@@ -103,7 +103,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
                 if isinstance(v, CronJob):
                     yield new_v
 
-    async def enqueue_job(self, func_name: str, *args, queue: str=None, **kwargs):
+    async def enqueue_job(self, func_name: str, *args, queue: str=None, unique=False, **kwargs):
         """
         Enqueue a job by pushing the encoded job information into the redis list specified by the queue.
 
@@ -120,17 +120,17 @@ class Actor(RedisMixin, metaclass=ActorMeta):
         if self._concurrency_enabled:
             redis = self.redis or await self.get_redis()
             main_logger.debug('%s.%s → %s', self.name, func_name, queue)
-            await self.job_future(redis, queue, func_name, *args, **kwargs)
+            await self.job_future(redis, queue, func_name, unique, *args, **kwargs)
         else:
             main_logger.debug('%s.%s → %s (called directly)', self.name, func_name, queue)
-            data = self.job_class.encode(class_name=self.name, func_name=func_name, args=args, kwargs=kwargs)
+            data = self.job_class.encode(class_name=self.name, func_name=func_name, unique=unique, args=args, kwargs=kwargs)
             j = self.job_class(data, queue_name=queue)
             await getattr(self, j.func_name).direct(*j.args, **j.kwargs)
 
-    def job_future(self, redis, queue: str, func_name: str, *args, **kwargs):
+    def job_future(self, redis, queue: str, func_name: str, unique: bool, *args, **kwargs):
         return redis.rpush(
             self.queue_lookup[queue],
-            self.job_class.encode(class_name=self.name, func_name=func_name, args=args, kwargs=kwargs),
+            self.job_class.encode(class_name=self.name, func_name=func_name, unique=unique, args=args, kwargs=kwargs),
         )
 
     def _now(self):
@@ -184,7 +184,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
 
 
 class Bindable:
-    def __init__(self, *, func, self_obj=None, **kwargs):
+    def __init__(self, *, func, self_obj=None, unique=False, **kwargs):
         self._self_obj: Actor = self_obj
         # if we're already bound we assume func is of the correct type and skip repeat logging
         if not self.bound and not inspect.iscoroutinefunction(func):
@@ -192,6 +192,7 @@ class Bindable:
         self._func: Callable = func
         self._dft_queue: str = kwargs['dft_queue']
         self._kwargs: Dict[str, Any] = kwargs
+        self._unique = unique
 
     def bind(self, obj: object):
         """
@@ -200,7 +201,7 @@ class Bindable:
 
         :param obj: object to bind the function to eg. "self" in the eyes of func.
         """
-        new_inst = self.__class__(func=self._func, self_obj=obj, **self._kwargs)
+        new_inst = self.__class__(func=self._func, self_obj=obj, unique=self._unique, **self._kwargs)
         setattr(obj, self._func.__name__, new_inst)
         return new_inst
 
@@ -216,7 +217,7 @@ class Bindable:
         return await self.defer(*args, **kwargs)
 
     async def defer(self, *args, queue_name=None, **kwargs):
-        await self._self_obj.enqueue_job(self._func.__name__, *args, queue=queue_name or self._dft_queue, **kwargs)
+        await self._self_obj.enqueue_job(self._func.__name__, *args, queue=queue_name or self._dft_queue, unique=self._unique, **kwargs)
 
     async def direct(self, *args, **kwargs):
         return await self._func(self._self_obj, *args, **kwargs)
@@ -234,8 +235,8 @@ class Concurrent(Bindable):
     """
     __slots__ = '_func', '_dft_queue', '_self_obj', '_kwargs'
 
-    def __init__(self, *, func, self_obj=None, dft_queue=None):
-        super().__init__(func=func, self_obj=self_obj, dft_queue=dft_queue)
+    def __init__(self, *, func, self_obj=None, dft_queue=None, unique=False):
+        super().__init__(func=func, self_obj=self_obj, dft_queue=dft_queue, unique=unique)
         if not self.bound:
             main_logger.debug('registering concurrent function %s', func.__qualname__)
 
@@ -247,7 +248,7 @@ class Concurrent(Bindable):
         return f'<concurrent function {self._func.__qualname__} of {self._self_obj!r}>'
 
 
-def concurrent(func_or_queue):
+def concurrent(func=None, queue=None, unique=False):
     """
     Decorator which defines a functions as concurrent, eg. it should be executed on the worker.
 
@@ -255,10 +256,12 @@ def concurrent(func_or_queue):
 
     The decorator can optionally be used with one argument: the queue to use by default for the job.
     """
-    if isinstance(func_or_queue, str):
-        return lambda f: Concurrent(func=f, dft_queue=func_or_queue)
+    if isinstance(func, str):
+        return lambda f: Concurrent(func=f, dft_queue=func, unique=unique)
+    elif func is None:
+        return lambda f: Concurrent(func=f, dft_queue=queue, unique=unique)
     else:
-        return Concurrent(func=func_or_queue)
+        return Concurrent(func=func, dft_queue=queue, unique=unique)
 
 
 class CronJob(Bindable):

@@ -41,7 +41,7 @@ class Job:
     Main Job class responsible for encoding and decoding jobs as they go
     into and come out of redis.
     """
-    __slots__ = 'id', 'queue', 'queued_at', 'class_name', 'func_name', 'args', 'kwargs', 'raw_queue', 'raw_data'
+    __slots__ = 'id', 'queue', 'queued_at', 'class_name', 'func_name', 'unique', 'args', 'kwargs', 'raw_queue', 'raw_data'
 
     def __init__(self, raw_data: bytes, *, queue_name: str=None, raw_queue: bytes=None) -> None:
         """
@@ -56,12 +56,12 @@ class Job:
             raise ArqError('either queue_name or raw_queue are required')
         self.queue = queue_name or raw_queue.decode()
         self.raw_queue = raw_queue or queue_name.encode()
-        self.queued_at, self.class_name, self.func_name, self.args, self.kwargs, self.id = self.decode_raw(raw_data)
+        self.queued_at, self.class_name, self.func_name, self.unique, self.args, self.kwargs, self.id = self.decode_raw(raw_data)
         self.queued_at /= 1000
 
     @classmethod
     def encode(cls, *, job_id: str=None, queued_at: int=None, class_name: str, func_name: str,
-               args: tuple, kwargs: dict) -> bytes:
+               unique: bool = False, args: tuple, kwargs: dict) -> bytes:
         """
         Create a byte string suitable for pushing into redis which contains all
         required information about a job to be performed.
@@ -75,7 +75,7 @@ class Job:
         """
         queued_at = queued_at or int(timestamp() * 1000)
         try:
-            return cls.encode_raw([queued_at, class_name, func_name, args, kwargs, cls.generate_id(job_id)])
+            return cls.encode_raw([queued_at, class_name, func_name, unique, args, kwargs, cls.generate_id(job_id)])
         except TypeError as e:
             raise JobSerialisationError(str(e)) from e
 

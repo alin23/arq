@@ -6,7 +6,8 @@ Drain class used by :class:`arq.worker.BaseWorker` and reusable elsewhere.
 """
 import asyncio
 import logging
-from typing import Set  # noqa
+from functools import partial
+from typing import Set, Dict  # noqa
 
 from aioredis import Redis
 from async_timeout import timeout
@@ -56,6 +57,7 @@ class Drain:
         self.burst_mode = burst_mode
         self.raise_task_exception = raise_task_exception
         self.pending_tasks: Set[asyncio.futures.Future] = set()
+        self.unique_pending_tasks: Dict[str, asyncio.futures.Future] = {}
         self.task_exception: Exception = None
         self.semaphore_timeout = semaphore_timeout
 
@@ -127,14 +129,24 @@ class Drain:
         :param job: job object, instance of :class:`arq.jobs.Job` or similar
         :param re_enqueue: whether or not to re-enqueue the job on finish if the job won't finish in time.
         """
+        job_key = f'{job.class_name}.{job.func_name}'
+        if job.unique:
+            old_task = self.unique_pending_tasks.get(job_key)
+            print(old_task)
+            if old_task and not old_task.done() and not old_task.cancelled():
+                print(old_task, 'not done not cancelled')
+                self._cancel_job(old_task)
+                del self.unique_pending_tasks[job_key]
         task = self.loop.create_task(coro(job))
         if re_enqueue:
             task.job = job
         task.re_enqueue = re_enqueue
 
-        task.add_done_callback(self._job_callback)
+        task.add_done_callback(partial(self._job_callback, job))
         self.loop.call_later(self.timeout_seconds, self._cancel_job, task, job)
         self.pending_tasks.add(task)
+        if job.unique:
+            self.unique_pending_tasks[job_key] = task
 
     async def finish(self, timeout=None):
         """
@@ -161,7 +173,7 @@ class Drain:
                 self.pending_tasks = set()
         return cancelled_tasks
 
-    def _job_callback(self, task):
+    def _job_callback(self, job, task):
         self.task_semaphore.release()
         self.jobs_complete += 1
         task_exception = task.exception()
@@ -170,15 +182,29 @@ class Drain:
             self.task_exception = task_exception
         elif task.result():
             self.jobs_failed += 1
+        self._remove_unique_task(job)
         self._remove_task(task)
         jobs_logger.debug('task complete, %d jobs done, %d failed', self.jobs_complete, self.jobs_failed)
 
-    def _cancel_job(self, task, job):
+    def _cancel_job(self, task, job=None):
         if not task.cancel():
             return
-        self.jobs_timed_out += 1
-        jobs_logger.error('task timed out %r', job)
+        if job:
+            self.jobs_timed_out += 1
+            jobs_logger.error('task timed out %r', job)
+            self._remove_unique_task(job)
+
         self._remove_task(task)
+
+    def _remove_unique_task(self, job):
+        if job.unique:
+            job_key = f'{job.class_name}.{job.func_name}'
+            task = self.unique_pending_tasks.get(job_key)
+            if task and (task.done() or task.cancelled()):
+                try:
+                    del self.unique_pending_tasks[job_key]
+                except KeyError:
+                    pass
 
     def _remove_task(self, task):
         try:
