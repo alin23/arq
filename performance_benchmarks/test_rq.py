@@ -1,10 +1,10 @@
 import sys
 
-from rq.decorators import job
 from redis import Redis
-from rq import Queue, Worker
 
-from jobs import fast_job, generate_big_dict, big_argument_job
+from rq import Queue, Worker
+from jobs import fast_job, big_argument_job, generate_big_dict
+from rq.decorators import job
 
 q = Queue(connection=Redis())
 
@@ -25,8 +25,9 @@ def start_jobs():
         v = generate_big_dict()
         big_argument.delay(v)
 
-if __name__ == '__main__':
-    if 'work' in sys.argv:
+
+if __name__ == "__main__":
+    if "work" in sys.argv:
         # easier than faffing around with rq worker's dumb import system
         worker = Worker([q], connection=q.connection)
         worker.work(burst=True)

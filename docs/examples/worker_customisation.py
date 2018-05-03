@@ -20,5 +20,5 @@ class Worker(BaseWorker):
     def logging_config(self, verbose):
         conf = super().logging_config(verbose)
         # alter logging setup to set arq.jobs level to WARNING
-        conf['loggers']['arq.jobs']['level'] = 'WARNING'
+        conf["loggers"]["arq.jobs"]["level"] = "WARNING"
         return conf

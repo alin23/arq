@@ -8,19 +8,20 @@ See arq's own tests for examples of usage.
 """
 import asyncio
 import logging
-from contextlib import contextmanager
 from datetime import datetime, timedelta
+from contextlib import contextmanager
 
 from .utils import RedisMixin, timestamp
 from .worker import BaseWorker
 
-logger = logging.getLogger('arq.mock')
+logger = logging.getLogger("arq.mock")
 
 
 class RaiseWorker(BaseWorker):
     """
     Worker which raises exceptions rather than logging them. Useful for testing.
     """
+
     @classmethod
     def handle_execute_exc(cls, started_at, exc, j):
         raise exc
@@ -39,34 +40,40 @@ class MockRedis:
     Very simple mock of aioredis > Redis which allows jobs to be enqueued and executed without
     redis.
     """
+
     def __init__(self, *, loop=None, data=None):
         self.loop = loop or asyncio.get_event_loop()
         self.data = {} if data is None else data
         self._expiry = {}
-        self._pool_or_conn = type('MockConnection', (), {'_loop': self.loop})
-        logger.info('initialising MockRedis, data id: %s', None if data is None else id(data))
+        self._pool_or_conn = type("MockConnection", (), {"_loop": self.loop})
+        logger.info(
+            "initialising MockRedis, data id: %s", None if data is None else id(data)
+        )
 
     def __await__(self):
         return redis_context_manager(self)
+
         yield  # pragma: no cover
 
     async def rpush(self, list_name, data):
-        logger.info('rpushing %s to %s', data, list_name)
+        logger.info("rpushing %s to %s", data, list_name)
         self.data[list_name] = self._get(list_name, []) + [data]
 
     async def blpop(self, *list_names, timeout=0):
         assert isinstance(timeout, int)
         start = timestamp() if timeout > 0 else None
-        logger.info('blpop from %s, timeout=%d', list_names, timeout)
+        logger.info("blpop from %s, timeout=%d", list_names, timeout)
         while True:
             v = await self.lpop(*list_names)
             if v:
                 return v
+
             t = timestamp() - start
             if start and t > timeout:
-                logger.info('blpop timed out %0.3fs', t)
+                logger.info("blpop timed out %0.3fs", t)
                 return
-            logger.info('blpop waiting for data %0.3fs', t)
+
+            logger.info("blpop waiting for data %0.3fs", t)
             await asyncio.sleep(0.5, loop=self.loop)
 
     async def lpop(self, *list_names):
@@ -74,17 +81,20 @@ class MockRedis:
             data_list = self._get(list_name)
             if data_list is None:
                 continue
+
             assert isinstance(data_list, list)
             if data_list:
                 d = data_list.pop(0)
-                logger.info('lpop %s from %s', d, list_name)
+                logger.info("lpop %s from %s", d, list_name)
                 return list_name, d
-        logger.info('lpop nothing found in lists %s', list_names)
+
+        logger.info("lpop nothing found in lists %s", list_names)
 
     def _get(self, key, default=None):
         expires = self._expiry.get(key, None)
         if expires and expires < datetime.now():
             return default
+
         return self.data.get(key, default)
 
     async def llen(self, list_name):

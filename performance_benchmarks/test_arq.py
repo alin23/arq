@@ -1,10 +1,11 @@
 import asyncio
-from arq import Actor, BaseWorker, concurrent
 
-from jobs import fast_job, generate_big_dict, big_argument_job
+from arq import Actor, BaseWorker, concurrent
+from jobs import fast_job, big_argument_job, generate_big_dict
 
 
 class TestActor(Actor):
+
     @concurrent
     async def fast(self):
         fast_job()
@@ -26,6 +27,7 @@ async def start_jobs():
         await actor.big_argument(v)
     await actor.close()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_jobs())

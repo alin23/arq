@@ -1,20 +1,21 @@
-import asyncio
-import json
 import os
+import json
+import time
 import pickle
 import signal
-import time
+import asyncio
 from pathlib import Path
 
-from arq import Actor, BaseWorker, Job, StopJob, concurrent, cron
+from arq import Job, Actor, StopJob, BaseWorker, cron, concurrent
 from arq.drain import Drain
 from arq.testing import MockRedisMixin
 
 
 class JobConstID(Job):
+
     @classmethod
     def generate_id(cls, given_id):
-        return '__id__'
+        return "__id__"
 
 
 class DemoActor(Actor):
@@ -23,39 +24,39 @@ class DemoActor(Actor):
     @concurrent
     async def add_numbers(self, a, b):
         """add_number docs"""
-        with open('add_numbers', 'w') as f:
+        with open("add_numbers", "w") as f:
             r = a + b
-            f.write('{}'.format(r))
+            f.write("{}".format(r))
 
     @concurrent
     async def subtract(self, a, b):
-        with open('subtract', 'w') as f:
+        with open("subtract", "w") as f:
             try:
                 r = a - b
             except TypeError as e:
                 r = str(e)
-            f.write('{}'.format(r))
+            f.write("{}".format(r))
 
     @concurrent
     async def save_values(self, *args):
-        with open('values', 'w') as f:
-            r = ', '.join('<{}>'.format(arg) for arg in args)
-            f.write('{}'.format(r))
+        with open("values", "w") as f:
+            r = ", ".join("<{}>".format(arg) for arg in args)
+            f.write("{}".format(r))
 
     @concurrent(Actor.HIGH_QUEUE)
     async def high_add_numbers(self, a, b, c=4):
-        with open('high_add_numbers', 'w') as f:
+        with open("high_add_numbers", "w") as f:
             r = a + b + c
-            f.write('{}'.format(r))
+            f.write("{}".format(r))
         return r
 
     @concurrent
     async def concat(self, a, b):
-        return a + ' + ' + b
+        return a + " + " + b
 
     @concurrent
     async def boom(self):
-        raise RuntimeError('boom')
+        raise RuntimeError("boom")
 
     @concurrent
     async def sleeper(self, t):
@@ -65,35 +66,34 @@ class DemoActor(Actor):
     @concurrent
     async def save_slow(self, v, sleep_for=0):
         await asyncio.sleep(sleep_for, loop=self.loop)
-        with open('save_slow', 'w') as f:
+        with open("save_slow", "w") as f:
             f.write(str(v))
 
     async def direct_method(self, a, b):
         return a + b
 
     @concurrent
-    async def store_info(self, key_suffix=''):
+    async def store_info(self, key_suffix=""):
         data = {
-            'self': str(self),
-            'class': self.__class__.__name__,
-            'is_shadow': self.is_shadow,
-            'loop': str(self.loop),
-            'settings': {
-                'data': dict(self.settings),
-                'class': self.settings.__class__.__name__
+            "self": str(self),
+            "class": self.__class__.__name__,
+            "is_shadow": self.is_shadow,
+            "loop": str(self.loop),
+            "settings": {
+                "data": dict(self.settings), "class": self.settings.__class__.__name__
             },
         }
         async with await self.get_redis() as redis:
-            await redis.set('actor_info' + key_suffix, json.dumps(data, indent=2))
+            await redis.set("actor_info" + key_suffix, json.dumps(data, indent=2))
         return data
 
     @concurrent
     async def stop_job_normal(self):
-        raise StopJob('stopping job normally')
+        raise StopJob("stopping job normally")
 
     @concurrent
     async def stop_job_warning(self):
-        raise StopJob('stopping job with warning', warning=True)
+        raise StopJob("stopping job with warning", warning=True)
 
 
 class RealJobActor(DemoActor):
@@ -112,17 +112,17 @@ class StartupActor(Actor):
     job_class = JobConstID
 
     async def startup(self):
-        with open('events', 'a') as f:
-            f.write('startup[{}],'.format(self.is_shadow))
+        with open("events", "a") as f:
+            f.write("startup[{}],".format(self.is_shadow))
 
     @concurrent
     async def concurrent_func(self, v):
-        with open('events', 'a') as f:
-            f.write('concurrent_func[{}],'.format(v))
+        with open("events", "a") as f:
+            f.write("concurrent_func[{}],".format(v))
 
     async def shutdown(self):
-        with open('events', 'a') as f:
-            f.write('shutdown[{}],'.format(self.is_shadow))
+        with open("events", "a") as f:
+            f.write("shutdown[{}],".format(self.is_shadow))
 
 
 class StartupWorker(BaseWorker):
@@ -135,6 +135,7 @@ class FastShutdownWorker(BaseWorker):
 
 
 class DrainQuit2(Drain):
+
     def _job_callback(self, task):
         super()._job_callback(task)
         if self.jobs_complete >= 2:
@@ -150,8 +151,9 @@ class WorkerQuit(Worker):
 
 
 class WorkerFail(Worker):
+
     async def run_job(self, j):
-        raise RuntimeError('foobar')
+        raise RuntimeError("foobar")
 
 
 class MockRedisWorker(MockRedisMixin, BaseWorker):
@@ -159,6 +161,7 @@ class MockRedisWorker(MockRedisMixin, BaseWorker):
 
 
 class DrainQuitImmediate(Drain):
+
     def _job_callback(self, task):
         super()._job_callback(task)
         self.running = False
@@ -169,7 +172,7 @@ class MockRedisWorkerQuit(MockRedisWorker):
 
 
 class FoobarActor(MockRedisDemoActor):
-    name = 'foobar'
+    name = "foobar"
 
 
 def kill_parent():
@@ -177,21 +180,21 @@ def kill_parent():
     os.kill(os.getppid(), signal.SIGTERM)
 
 
-with Path(__file__).resolve().parent.joinpath('example.py').open() as f:
+with Path(__file__).resolve().parent.joinpath("example.py").open() as f:
     EXAMPLE_FILE = f.read()
 
 
 class ParentActor(MockRedisMixin, Actor):
-    v = 'Parent'
+    v = "Parent"
 
     @concurrent
     async def save_value(self, file_name):
-        with open(file_name, 'w') as f:
+        with open(file_name, "w") as f:
             f.write(self.v)
 
 
 class ChildActor(ParentActor):
-    v = 'Child'
+    v = "Child"
 
 
 class ParentChildActorWorker(MockRedisMixin, BaseWorker):
@@ -208,27 +211,28 @@ class CronActor(Actor):
 
     @cron(hour=3, minute=0, second=0, run_at_startup=True)
     async def save_foobar(self):
-        with open('foobar', 'w') as f:
-            f.write(f'foobar the value')
+        with open("foobar", "w") as f:
+            f.write(f"foobar the value")
 
     @cron(hour=3, minute=0, second=0)
     async def save_spam(self):
-        with open('spam', 'w') as f:
-            f.write(f'spam the value')
+        with open("spam", "w") as f:
+            f.write(f"spam the value")
 
     @cron(hour=3, minute=0, second=0, unique=False)
     async def save_not_unique(self):
-        with open('not_unique', 'w') as f:
-            f.write(f'not_unique the value')
+        with open("not_unique", "w") as f:
+            f.write(f"not_unique the value")
 
     def _now(self):
         try:
-            with open('datatime.pkl', 'rb') as f:
+            with open("datatime.pkl", "rb") as f:
                 dts = pickle.load(f)
             dt = dts.pop(0)
-            with open('datatime.pkl', 'wb') as f:
+            with open("datatime.pkl", "wb") as f:
                 pickle.dump(dts, f)
             return dt
+
         except FileNotFoundError:
             return super()._now()
 

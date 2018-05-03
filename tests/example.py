@@ -2,15 +2,16 @@ from arq import Actor, BaseWorker, concurrent
 
 
 class ActorTest(Actor):
+
     @concurrent
     async def foo(self, a, b=0):
-        with open('foo', 'w') as f:
+        with open("foo", "w") as f:
             r = a + b
-            f.write('{}'.format(r))
+            f.write("{}".format(r))
 
 
 class Worker(BaseWorker):
-    signature = 'foobar'
+    signature = "foobar"
     shadows = [ActorTest]
 
 
@@ -30,6 +31,7 @@ class WorkerSignalTwiceQuit(Worker):
     """
     worker which simulates receiving sigint twice after 2 jobs
     """
+
     async def run_job(self, *args):
         await super().run_job(*args)
         if self.jobs_complete >= 2:
