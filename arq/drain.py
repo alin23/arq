@@ -168,7 +168,7 @@ class Drain:
         timeout_seconds = job.timeout_seconds or self.timeout_seconds
         if timeout_seconds > 0:
             timeout_callback = self.loop.call_later(
-                self.timeout_seconds, self._cancel_job, task
+                timeout_seconds, self._cancel_job, task
             )
             self.timeout_callbacks[str(job)] = timeout_callback
 
