@@ -4,7 +4,9 @@
 		{
 			"folder_exclude_patterns":
 			[
-				"arq.egg-info"
+				"arq.egg-info",
+				".cache",
+				".pytest_cache"
 			],
 			"path": "."
 		}

@@ -111,6 +111,7 @@ class BaseWorker(RedisMixin):
         self._closed = False
         self.drain: Drain = None
         self.job_class: Type[Job] = None
+        self.queue_task_count = {}
         super().__init__(**kwargs)
         self._add_signal_handler(signal.SIGINT, self.handle_sig)
         self._add_signal_handler(signal.SIGTERM, self.handle_sig)
@@ -285,7 +286,7 @@ class BaseWorker(RedisMixin):
     async def record_health(self, redis_queues, queue_lookup):
         now_ts = timestamp()
         if (now_ts - self.last_health_check) < self.health_check_interval:
-            return
+            return False
 
         self.last_health_check = now_ts
         pending_tasks = sum(not t.done() for t in self.drain.pending_tasks)
@@ -293,10 +294,19 @@ class BaseWorker(RedisMixin):
             f"{datetime.now():%b-%d %H:%M:%S} j_complete={self.jobs_complete} j_failed={self.jobs_failed} "
             f"j_timedout={self.jobs_timed_out} j_ongoing={pending_tasks}"
         )
-        for redis_queue in redis_queues:
-            info += " q_{}={}".format(
-                queue_lookup[redis_queue], await self.drain.redis.llen(redis_queue)
-            )
+
+        tr = self.drain.redis.multi_exec()
+        for rq in redis_queues:
+            tr.llen(rq)
+        queue_task_count = await tr.execute()
+        self.queue_task_count = {
+            queue_lookup[rq]: task_count
+            for rq, task_count in zip(redis_queues, queue_task_count)
+        }
+
+        for queue_name, task_count in self.queue_task_count.items():
+            info += " q_{}={}".format(queue_name, task_count)
+
         await self.drain.redis.setex(
             self.health_check_key, self.health_check_interval + 1, info.encode()
         )
@@ -304,6 +314,8 @@ class BaseWorker(RedisMixin):
         if self.repeat_health_check_logs or log_suffix != self._last_health_check_log:
             jobs_logger.info("recording health: %s", info)
             self._last_health_check_log = log_suffix
+
+        return True
 
     async def _check_health(self):
         r = 1
