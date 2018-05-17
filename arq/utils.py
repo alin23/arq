@@ -22,7 +22,7 @@ class RedisSettings:
     """
     No-Op class used to hold redis connection redis_settings.
     """
-    __slots__ = "host", "port", "database", "password", "conn_retries", "conn_timeout", "conn_retry_delay"
+    __slots__ = "host", "port", "database", "password", "conn_retries", "conn_timeout", "conn_retry_delay", "pool_minsize", "pool_maxsize"
 
     def __init__(
         self,
@@ -33,6 +33,8 @@ class RedisSettings:
         conn_timeout=1,
         conn_retries=5,
         conn_retry_delay=1,
+        pool_minsize=1,
+        pool_maxsize=10,
     ):
         """
         :param host: redis host
@@ -47,6 +49,8 @@ class RedisSettings:
         self.conn_timeout = conn_timeout
         self.conn_retries = conn_retries
         self.conn_retry_delay = conn_retry_delay
+        self.pool_minsize = pool_minsize
+        self.pool_maxsize = pool_maxsize
 
     def __repr__(self):
         return "<RedisSettings {}>".format(
@@ -71,6 +75,8 @@ async def create_pool_lenient(
             db=settings.database,
             password=settings.password,
             timeout=settings.conn_timeout,
+            minsize=settings.pool_minsize,
+            maxsize=settings.pool_maxsize,
         )
     except (ConnectionError, OSError, aioredis.RedisError, asyncio.TimeoutError) as e:
         if _retry < settings.conn_retries:
