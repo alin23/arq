@@ -402,16 +402,14 @@ class BaseWorker(RedisMixin):
         # exit with zero so we don't increment jobs_failed twice
         return 0
 
-    @classmethod
-    def handle_stop_job(cls, started_at: float, exc: StopJob, j: Job):
+    def handle_stop_job(self, started_at: float, exc: StopJob, j: Job):
         if exc.warning:
             msg, logger = "%-4s ran in%7.3fs ■ %s ● Stopped Warning %s", jobs_logger.warning
         else:
             msg, logger = "%-4s ran in%7.3fs ■ %s ● Stopped %s", jobs_logger.info
         logger(msg, j.queue, timestamp() - started_at, j.short_ref(), exc)
 
-    @classmethod
-    def handle_execute_exc(cls, started_at: float, exc: BaseException, j: Job):
+    def handle_execute_exc(self, started_at: float, exc: BaseException, j: Job):
         exc_type = exc.__class__.__name__
         jobs_logger.exception(
             "%-4s ran in%7.3fs ! %s: %s", j.queue, timestamp() - started_at, j, exc_type
