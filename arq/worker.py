@@ -9,6 +9,7 @@ import sys
 import time
 import signal
 import asyncio
+import inspect
 import logging
 from signal import Signals
 from typing import Dict, List, Type  # noqa
@@ -192,9 +193,9 @@ class BaseWorker(RedisMixin):
 
         with timeout(self._shadow_factory_timeout):
             shadows = await self.shadow_factory()
-        assert isinstance(shadows, list), (
-            "shadow_factory should return a list not %s" % type(shadows)
-        )
+        assert isinstance(
+            shadows, list
+        ), "shadow_factory should return a list not %s" % type(shadows)
         self.job_class = shadows[0].job_class
         work_logger.debug('Using first shadows job class "%s"', self.job_class.__name__)
         for shadow in shadows[1:]:
@@ -310,7 +311,7 @@ class BaseWorker(RedisMixin):
         await self.drain.redis.setex(
             self.health_check_key, self.health_check_interval + 1, info.encode()
         )
-        log_suffix = info[info.index("j_complete="):]
+        log_suffix = info[info.index("j_complete=") :]
         if self.repeat_health_check_logs or log_suffix != self._last_health_check_log:
             jobs_logger.info("recording health: %s", info)
             self._last_health_check_log = log_suffix
@@ -368,11 +369,15 @@ class BaseWorker(RedisMixin):
         try:
             result = await func(*j.args, **j.kwargs)
         except StopJob as e:
-            self.handle_stop_job(started_at, e, j)
+            res = self.handle_stop_job(started_at, e, j)
+            if inspect.isawaitable(res):
+                await res
             return 0
 
         except BaseException as e:
-            self.handle_execute_exc(started_at, e, j)
+            res = self.handle_execute_exc(started_at, e, j)
+            if inspect.isawaitable(res):
+                await res
             return 1
 
         else:
@@ -404,7 +409,10 @@ class BaseWorker(RedisMixin):
 
     def handle_stop_job(self, started_at: float, exc: StopJob, j: Job):
         if exc.warning:
-            msg, logger = "%-4s ran in%7.3fs ■ %s ● Stopped Warning %s", jobs_logger.warning
+            msg, logger = (
+                "%-4s ran in%7.3fs ■ %s ● Stopped Warning %s",
+                jobs_logger.warning,
+            )
         else:
             msg, logger = "%-4s ran in%7.3fs ■ %s ● Stopped %s", jobs_logger.info
         logger(msg, j.queue, timestamp() - started_at, j.short_ref(), exc)
