@@ -41,7 +41,19 @@ class Job:
     Main Job class responsible for encoding and decoding jobs as they go
     into and come out of redis.
     """
-    __slots__ = "id", "queue", "queued_at", "class_name", "func_name", "unique", "timeout_seconds", "args", "kwargs", "raw_queue", "raw_data"
+    __slots__ = (
+        "id",
+        "queue",
+        "queued_at",
+        "class_name",
+        "func_name",
+        "unique",
+        "timeout_seconds",
+        "args",
+        "kwargs",
+        "raw_queue",
+        "raw_data",
+    )
 
     def __init__(
         self, raw_data: bytes, *, queue_name: str = None, raw_queue: bytes = None

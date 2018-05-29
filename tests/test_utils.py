@@ -27,10 +27,10 @@ def test_settings_changed():
 
 @pytest.mark.skipif(os.getenv("TZ") is None, reason="TZ=Asia/Singapore must be set")
 def test_timestamp():
-    assert 7.99 < (datetime.now() - datetime.utcnow()).total_seconds() / 3600 < 8.01, (
+    assert 7.99 < (datetime.utcnow() - datetime.utcnow()).total_seconds() / 3600 < 8.01, (
         "timezone not set to " "Asia/Singapore"
     )
-    unix_stamp = int(datetime.now().strftime("%s"))
+    unix_stamp = int(datetime.utcnow().strftime("%s"))
     assert abs(timestamp() - unix_stamp) < 2
 
 
@@ -185,9 +185,9 @@ async def test_redis_log(loop):
     ],
 )
 def test_next_cron(previous, expected, kwargs):
-    start = datetime.now()
+    start = datetime.utcnow()
     assert next_cron(previous, **kwargs) == expected
-    diff = datetime.now() - start
+    diff = datetime.utcnow() - start
     print(f"{diff.total_seconds() * 1000:0.3f}ms")
 
 
@@ -237,9 +237,9 @@ def test_next_cron_invalid():
 def test_next_cron_random(max_previous, kwargs, expected):
     for i in range(100):
         previous = expected - timedelta(seconds=0.9 + random() * max_previous)
-        start = datetime.now()
+        start = datetime.utcnow()
         v = next_cron(previous, **kwargs)
-        diff = datetime.now() - start
+        diff = datetime.utcnow() - start
         print(
             f"previous: {previous}, expected: {expected}, time: {diff.total_seconds() * 1000:0.3f}ms"
         )

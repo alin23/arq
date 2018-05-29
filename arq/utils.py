@@ -22,7 +22,17 @@ class RedisSettings:
     """
     No-Op class used to hold redis connection redis_settings.
     """
-    __slots__ = "host", "port", "database", "password", "conn_retries", "conn_timeout", "conn_retry_delay", "pool_minsize", "pool_maxsize"
+    __slots__ = (
+        "host",
+        "port",
+        "database",
+        "password",
+        "conn_retries",
+        "conn_timeout",
+        "conn_retry_delay",
+        "pool_minsize",
+        "pool_maxsize",
+    )
 
     def __init__(
         self,
@@ -120,9 +130,9 @@ class RedisMixin:
         # the "or getattr(...) or" seems odd but it allows the mixin to work with subclasses which initialise
         # loop or redis_settings before calling super().__init__ and don't pass those parameters through in kwargs.
         self.loop = loop or getattr(self, "loop", None) or asyncio.get_event_loop()
-        self.redis_settings = redis_settings or getattr(
-            self, "redis_settings", None
-        ) or RedisSettings()
+        self.redis_settings = (
+            redis_settings or getattr(self, "redis_settings", None) or RedisSettings()
+        )
         self.redis = existing_redis
         self._create_pool_lock = asyncio.Lock(loop=self.loop)
 
@@ -244,7 +254,7 @@ def truncate(s: str, length: int = DEFAULT_CURTAIL) -> str:
     :param length: length to truncate the string to
     """
     if len(s) > length:
-        s = s[:length - 1] + "…"
+        s = s[: length - 1] + "…"
     return s
 
 
@@ -277,21 +287,31 @@ def _get_next_dt(dt_, options):  # noqa: C901
                     return datetime(dt_.year, dt_.month + 1, 1)
 
             elif field in ("day", "weekday"):
-                return dt_ + timedelta(days=1) - timedelta(
-                    hours=dt_.hour,
-                    minutes=dt_.minute,
-                    seconds=dt_.second,
-                    microseconds=micro,
+                return (
+                    dt_
+                    + timedelta(days=1)
+                    - timedelta(
+                        hours=dt_.hour,
+                        minutes=dt_.minute,
+                        seconds=dt_.second,
+                        microseconds=micro,
+                    )
                 )
 
             elif field == "hour":
-                return dt_ + timedelta(hours=1) - timedelta(
-                    minutes=dt_.minute, seconds=dt_.second, microseconds=micro
+                return (
+                    dt_
+                    + timedelta(hours=1)
+                    - timedelta(
+                        minutes=dt_.minute, seconds=dt_.second, microseconds=micro
+                    )
                 )
 
             elif field == "minute":
-                return dt_ + timedelta(minutes=1) - timedelta(
-                    seconds=dt_.second, microseconds=micro
+                return (
+                    dt_
+                    + timedelta(minutes=1)
+                    - timedelta(seconds=dt_.second, microseconds=micro)
                 )
 
             elif field == "second":

@@ -92,7 +92,7 @@ class MockRedis:
 
     def _get(self, key, default=None):
         expires = self._expiry.get(key, None)
-        if expires and expires < datetime.now():
+        if expires and expires < datetime.utcnow():
             return default
 
         return self.data.get(key, default)
@@ -108,7 +108,7 @@ class MockRedis:
 
     async def setex(self, key, expires, value):
         self.data[key] = value
-        self._expiry[key] = datetime.now() + timedelta(seconds=expires)
+        self._expiry[key] = datetime.utcnow() + timedelta(seconds=expires)
 
     async def get(self, key):
         return self._get(key)

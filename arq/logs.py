@@ -32,7 +32,7 @@ class ColourHandler(logging.StreamHandler):
         m = re.match("^(.*?: )", log_entry)
         if m:
             prefix = click.style(m.groups()[0], fg="magenta")
-            msg = click.style(log_entry[m.end():], **get_log_format(record))
+            msg = click.style(log_entry[m.end() :], **get_log_format(record))
             click.echo(prefix + msg)
         else:
             click.secho(log_entry, **get_log_format(record))

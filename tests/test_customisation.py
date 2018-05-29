@@ -37,7 +37,7 @@ async def test_encode_datetimes(tmpworkdir, loop, redis_conn):
 async def test_bad_encoder(loop):
     actor = DemoActor(loop=loop)
     with pytest.raises(JobSerialisationError):
-        await actor.save_values(datetime.now())
+        await actor.save_values(datetime.utcnow())
     await actor.close()
 
 

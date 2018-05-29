@@ -170,7 +170,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
 
     def _now(self):
         # allow easier mocking
-        return datetime.now()
+        return datetime.utcnow()
 
     async def run_cron(self):
         n = self._now()
@@ -190,7 +190,10 @@ class Actor(RedisMixin, metaclass=ActorMeta):
         with await redis_ as redis:
             for cron_job, run_at in to_run:
                 if cron_job.unique:
-                    sentinel_key = self.CRON_SENTINEL_PREFIX + f"{self.name}.{cron_job.__name__}".encode()
+                    sentinel_key = (
+                        self.CRON_SENTINEL_PREFIX
+                        + f"{self.name}.{cron_job.__name__}".encode()
+                    )
                     sentinel_value = str(to_unix_ms(run_at)).encode()
                     v, _ = await asyncio.gather(
                         redis.getset(sentinel_key, sentinel_value),
@@ -343,7 +346,16 @@ def concurrent(func=None, queue=None, unique=False, timeout_seconds=60):
 
 
 class CronJob(Bindable):
-    __slots__ = "_func", "_dft_queue", "_self_obj", "_kwargs", "run_at_startup", "unique", "cron_kwargs", "next_run"
+    __slots__ = (
+        "_func",
+        "_dft_queue",
+        "_self_obj",
+        "_kwargs",
+        "run_at_startup",
+        "unique",
+        "cron_kwargs",
+        "next_run",
+    )
 
     def __init__(self, *, func, self_obj=None, **kwargs):
         super().__init__(func=func, self_obj=self_obj, **kwargs)
