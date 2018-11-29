@@ -2,10 +2,11 @@
 :mod:`logs`
 ===========
 """
-import re
 import logging
+import re
 
 import click
+
 
 __all__ = ["ColourHandler", "default_log_config"]
 
@@ -29,7 +30,7 @@ class ColourHandler(logging.StreamHandler):
 
     def emit(self, record):
         log_entry = self.format(record)
-        m = re.match("^(.*?: )", log_entry)
+        m = re.match(r"^(.*?: )", log_entry)
         if m:
             prefix = click.style(m.groups()[0], fg="magenta")
             msg = click.style(log_entry[m.end() :], **get_log_format(record))

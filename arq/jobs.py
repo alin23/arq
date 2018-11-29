@@ -4,13 +4,14 @@
 
 Defines the ``Job`` class and descendants which deal with encoding and decoding job data.
 """
-import os
 import base64
+import os
 from datetime import datetime
 
 import msgpack
 
-from .utils import DEFAULT_CURTAIL, truncate, timestamp, from_unix_ms, to_unix_ms_tz
+from .utils import DEFAULT_CURTAIL, from_unix_ms, timestamp, to_unix_ms_tz, truncate
+
 
 __all__ = ["JobSerialisationError", "Job", "DatetimeJob"]
 
@@ -36,11 +37,13 @@ def gen_random():
 DEVICE_CONTROL_ONE = "\x11"
 
 
+# pylint: disable=too-many-instance-attributes
 class Job:
     """
     Main Job class responsible for encoding and decoding jobs as they go
     into and come out of redis.
     """
+
     __slots__ = (
         "id",
         "queue",
@@ -129,9 +132,7 @@ class Job:
         """
         if isinstance(obj, set):
             return {DEVICE_CONTROL_ONE: list(obj)}
-
-        else:
-            return obj
+        return obj
 
     @classmethod
     def msgpack_object_hook(cls, obj):
@@ -190,14 +191,10 @@ class DatetimeJob(Job):
             if tz is not None:
                 result[TIMEZONE] = tz
             return result
-
-        else:
-            return super().msgpack_encoder(obj)
+        return super().msgpack_encoder(obj)
 
     @classmethod
     def msgpack_object_hook(cls, obj):
         if len(obj) <= 2 and DEVICE_CONTROL_TWO in obj:
             return from_unix_ms(obj[DEVICE_CONTROL_TWO], utcoffset=obj.get(TIMEZONE))
-
-        else:
-            return super().msgpack_object_hook(obj)
+        return super().msgpack_object_hook(obj)

@@ -9,11 +9,12 @@ Also defines the ``@cron`` decorator for declaring cron job functions.
 import asyncio
 import inspect
 import logging
-from typing import Any, Dict, List, Union, Callable  # noqa
 from datetime import datetime
+from typing import Any, Callable, Dict, List, Union  # noqa
 
 from .jobs import Job
 from .utils import RedisMixin, next_cron, to_unix_ms
+
 
 __all__ = ["Actor", "concurrent", "cron"]
 
@@ -21,7 +22,6 @@ main_logger = logging.getLogger("arq.main")
 
 
 class ActorMeta(type):
-
     def __new__(mcs, cls, bases, classdict):
         queues = classdict.get("queues")
         if queues and len(queues) != len(set(queues)):
@@ -42,6 +42,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
     Actors operate in two modes: normal mode when you initialise them and use them, and "shadow mode"
     where the actor is initialised by the worker and used to execute jobs.
     """
+
     #: highest priority queue, this can be overwritten by changing :attr:`arq.main.Actor.queues`
     HIGH_QUEUE = "high"
 
@@ -53,6 +54,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
 
     #: prefix prepended to all queue names to create the list keys in redis
     QUEUE_PREFIX = b"arq:q:"
+    CANCEL_QUEUE = QUEUE_PREFIX + b"cancel"
 
     CRON_SENTINEL_PREFIX = b"arq:cron:"
 
@@ -87,13 +89,11 @@ class Actor(RedisMixin, metaclass=ActorMeta):
         """
         Override to setup objects you'll need while running the worker, eg. sessions and database connections
         """
-        pass
 
     async def shutdown(self):
         """
         Override to gracefully close or delete any objects you setup in ``startup``
         """
-        pass
 
     def _bind_decorators(self):
         for attr_name in dir(self.__class__):
@@ -103,13 +103,19 @@ class Actor(RedisMixin, metaclass=ActorMeta):
                 if isinstance(v, CronJob):
                     yield new_v
 
+    async def cancel(self, job_id, *job_ids):
+        main_logger.debug("Queued cancel task for job %s", job_id)
+        return await self.redis.rpush(
+            self.CANCEL_QUEUE, job_id.encode(), *(j.encode() for j in job_ids)
+        )
+
     async def enqueue_job(
         self,
         func_name: str,
         *args,
         queue: str = None,
         unique=False,
-        timeout_seconds=60,
+        timeout_seconds=0,
         **kwargs,
     ):
         """
@@ -128,25 +134,24 @@ class Actor(RedisMixin, metaclass=ActorMeta):
         if self._concurrency_enabled:
             redis = self.redis or await self.get_redis()
             main_logger.debug("%s.%s → %s", self.name, func_name, queue)
-            await self.job_future(
+            return await self.job_future(
                 redis, queue, func_name, unique, timeout_seconds, *args, **kwargs
             )
-        else:
-            main_logger.debug(
-                "%s.%s → %s (called directly)", self.name, func_name, queue
-            )
-            data = self.job_class.encode(
-                class_name=self.name,
-                func_name=func_name,
-                unique=unique,
-                timeout_seconds=timeout_seconds,
-                args=args,
-                kwargs=kwargs,
-            )
-            j = self.job_class(data, queue_name=queue)
-            await getattr(self, j.func_name).direct(*j.args, **j.kwargs)
 
-    def job_future(
+        main_logger.debug("%s.%s → %s (called directly)", self.name, func_name, queue)
+        data = self.job_class.encode(
+            class_name=self.name,
+            func_name=func_name,
+            unique=unique,
+            timeout_seconds=timeout_seconds,
+            args=args,
+            kwargs=kwargs,
+        )
+        j = self.job_class(data, queue_name=queue)
+        await getattr(self, j.func_name).direct(*j.args, **j.kwargs)
+        return j
+
+    async def job_future(
         self,
         redis,
         queue: str,
@@ -156,19 +161,20 @@ class Actor(RedisMixin, metaclass=ActorMeta):
         *args,
         **kwargs,
     ):
-        return redis.rpush(
-            self.queue_lookup[queue],
-            self.job_class.encode(
-                class_name=self.name,
-                func_name=func_name,
-                unique=unique,
-                timeout_seconds=timeout_seconds,
-                args=args,
-                kwargs=kwargs,
-            ),
+        data = self.job_class.encode(
+            class_name=self.name,
+            func_name=func_name,
+            unique=unique,
+            timeout_seconds=timeout_seconds,
+            args=args,
+            kwargs=kwargs,
         )
+        await redis.rpush(self.queue_lookup[queue], data)
 
-    def _now(self):
+        return self.job_class(data, queue_name=queue)
+
+    @staticmethod
+    def _now():
         # allow easier mocking
         return datetime.utcnow()
 
@@ -213,8 +219,10 @@ class Actor(RedisMixin, metaclass=ActorMeta):
                     )
                 )
 
-            job_futures and await asyncio.gather(*job_futures)
+            if job_futures:
+                await asyncio.gather(*job_futures)
 
+    # pylint: disable=arguments-differ
     async def close(self, shutdown=False):
         """
         Close down the actor, eg. close the associated redis pool, optionally also calling shutdown.
@@ -231,9 +239,8 @@ class Actor(RedisMixin, metaclass=ActorMeta):
 
 
 class Bindable:
-
     def __init__(
-        self, *, func, self_obj=None, unique=False, timeout_seconds=60, **kwargs
+        self, *, func, self_obj=None, unique=False, timeout_seconds=0, **kwargs
     ):
         self._self_obj: Actor = self_obj
         # if we're already bound we assume func is of the correct type and skip repeat logging
@@ -275,7 +282,7 @@ class Bindable:
         return await self.defer(*args, **kwargs)
 
     async def defer(self, *args, queue_name=None, timeout_seconds=None, **kwargs):
-        await self._self_obj.enqueue_job(
+        return await self._self_obj.enqueue_job(
             self._func.__name__,
             *args,
             queue=queue_name or self._dft_queue,
@@ -298,10 +305,11 @@ class Concurrent(Bindable):
 
     You shouldn't have to use this directly, but instead apply the ``@concurrent`` decorator
     """
+
     __slots__ = "_func", "_dft_queue", "_self_obj", "_kwargs"
 
     def __init__(
-        self, *, func, self_obj=None, dft_queue=None, unique=False, timeout_seconds=60
+        self, *, func, self_obj=None, dft_queue=None, unique=False, timeout_seconds=0
     ):
         super().__init__(
             func=func,
@@ -321,7 +329,7 @@ class Concurrent(Bindable):
         return f"<concurrent function {self._func.__qualname__} of {self._self_obj!r}>"
 
 
-def concurrent(func=None, queue=None, unique=False, timeout_seconds=60):
+def concurrent(func=None, queue=None, unique=False, timeout_seconds=0):
     """
     Decorator which defines a functions as concurrent, eg. it should be executed on the worker.
 
@@ -334,15 +342,14 @@ def concurrent(func=None, queue=None, unique=False, timeout_seconds=60):
             func=f, dft_queue=func, unique=unique, timeout_seconds=timeout_seconds
         )
 
-    elif func is None:
+    if func is None:
         return lambda f: Concurrent(
             func=f, dft_queue=queue, unique=unique, timeout_seconds=timeout_seconds
         )
 
-    else:
-        return Concurrent(
-            func=func, dft_queue=queue, unique=unique, timeout_seconds=timeout_seconds
-        )
+    return Concurrent(
+        func=func, dft_queue=queue, unique=unique, timeout_seconds=timeout_seconds
+    )
 
 
 class CronJob(Bindable):
@@ -390,7 +397,7 @@ def cron(
     hour: Union[None, set, int] = None,
     minute: Union[None, set, int] = None,
     second: Union[None, set, int] = 0,
-    microsecond: int = 123456,
+    microsecond: int = 123_456,
     dft_queue=None,
     run_at_startup=False,
     unique=True,

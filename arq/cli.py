@@ -2,8 +2,9 @@ import logging.config
 
 import click
 
-from .worker import RunWorkerProcess, import_string
 from .version import VERSION
+from .worker import RunWorkerProcess, import_string
+
 
 burst_help = "Batch mode: exit once no jobs are found in any queue."
 health_check_help = "Health Check: run a health check and exit"

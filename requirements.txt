@@ -1,2 +1,10 @@
+pre-commit
+pylint
+black
+isort
+pudb
+ipython
+pytest-pudb
+
 -r docs/requirements.txt
 -r tests/requirements.txt

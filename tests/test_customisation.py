@@ -1,10 +1,9 @@
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
-import pytz
 import pytest
-
-from arq.jobs import Job, DatetimeJob, JobSerialisationError
+import pytz
+from arq.jobs import DatetimeJob, Job, JobSerialisationError
 from arq.worker import BaseWorker
 
 from .fixtures import DemoActor, RealJobActor
@@ -18,7 +17,7 @@ class DatetimeWorker(BaseWorker):
     shadows = [DatetimeActor]
 
 
-async def test_encode_datetimes(tmpworkdir, loop, redis_conn):
+async def test_encode_datetimes(tmpworkdir, loop):
     actor = DatetimeActor(loop=loop)
     d1 = datetime(2032, 2, 2, 9, 0)
     d2 = datetime(2032, 1, 3, 9, 0)
@@ -44,11 +43,12 @@ async def test_bad_encoder(loop):
 async def test_bad_encoder_dt(loop):
     actor = DatetimeActor(loop=loop)
     with pytest.raises(JobSerialisationError):
+        # pylint: disable=no-value-for-parameter
         await actor.subtract(datetime)
     await actor.close()
 
 
-async def test_encode_datetimes_tz(tmpworkdir, loop, redis_conn):
+async def test_encode_datetimes_tz(tmpworkdir, loop):
     d1 = datetime(2032, 2, 2, 9, 0, tzinfo=timezone(timedelta(seconds=-3600)))
     d2 = datetime(2032, 1, 3, 9, 0, tzinfo=timezone.utc)
     actor = DatetimeActor(loop=loop)
@@ -63,7 +63,7 @@ async def test_encode_datetimes_tz(tmpworkdir, loop, redis_conn):
     await worker.close()
 
 
-async def test_encode_non_datetimes(tmpworkdir, loop, redis_conn):
+async def test_encode_non_datetimes(tmpworkdir, loop):
     actor = DatetimeActor(loop=loop)
     await actor.save_values({"a": 1}, {"a": 2})
     await actor.close()
@@ -90,7 +90,6 @@ async def test_wrong_job_class(loop):
 
 
 async def test_wrong_queues(loop):
-
     class DifferentQueuesActor(DemoActor):
         queues = (DemoActor.DEFAULT_QUEUE, "foobar")
 
@@ -99,13 +98,10 @@ async def test_wrong_queues(loop):
     )
     with pytest.raises(TypeError) as excinfo:
         await worker.run()
-    msg = re.sub("0x\w+>", "0x123>", excinfo.value.args[0])
-    assert (
-        msg
-        == (
-            "<DifferentQueuesActor(DifferentQueuesActor) at 0x123> has a different "
-            "list of queues to the first shadow: ('dft', 'foobar') != ('high', 'dft', 'low')"
-        )
+    msg = re.sub(r"0x\w+>", "0x123>", excinfo.value.args[0])
+    assert msg == (
+        "<DifferentQueuesActor(DifferentQueuesActor) at 0x123> has a different "
+        "list of queues to the first shadow: ('dft', 'foobar') != ('high', 'dft', 'low')"
     )
     await worker.close()
 

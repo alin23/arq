@@ -1,21 +1,25 @@
-from pathlib import Path
+import types
 from importlib.machinery import SourceFileLoader
+from pathlib import Path
+
 
 THIS_DIR = Path(__file__).parent
 
 
-async def test_run_job_burst(redis_conn, loop, caplog):
-    demo = SourceFileLoader(
-        "demo", str(THIS_DIR / "../docs/examples/main_demo.py")
-    ).load_module()
+async def test_run_job_burst(loop, caplog):
+    loader = SourceFileLoader("demo", str(THIS_DIR / "../docs/examples/main_demo.py"))
+    demo = types.ModuleType(loader.name)
+    loader.exec_module(demo)
+    # pylint: disable=no-member
     worker = demo.Worker(burst=True, loop=loop)
 
+    # pylint: disable=no-member
     downloader = demo.Downloader(loop=loop)
 
     await downloader.download_content("http://example.com")
     await worker.run()
     await downloader.close()
-    log = caplog((" [0-9a-z]{6} ", " __id__ "))
-    print(log)
-    assert "s → __id__ Downloader.download_content(http://example.com)" in log
-    assert "s ← __id__ Downloader.download_content ● 1" in log
+    assert any(
+        "Downloader.download_content(http://example.com)" in m for m in caplog.messages
+    )
+    assert any("Downloader.download_content ● 1" in m for m in caplog.messages)

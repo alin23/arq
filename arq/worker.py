@@ -4,27 +4,27 @@
 
 Responsible for executing jobs on the worker.
 """
+import asyncio
+import logging
 import os
+import signal
 import sys
 import time
-import signal
-import asyncio
-import inspect
-import logging
-from signal import Signals
-from typing import Dict, List, Type  # noqa
 from datetime import datetime
 from functools import partial
-from importlib import reload, import_module
+from importlib import import_module, reload
 from multiprocessing import Process
+from signal import Signals  # pylint: disable=no-name-in-module
+from typing import Dict, List, Type
 
 from async_timeout import timeout
 
-from .jobs import Job, ArqError
+from .drain import Drain
+from .jobs import ArqError, Job
 from .logs import default_log_config
 from .main import Actor  # noqa
-from .drain import Drain
-from .utils import RedisMixin, truncate, timestamp
+from .utils import RedisMixin, timestamp, truncate
+
 
 __all__ = ["BaseWorker", "RunWorkerProcess", "StopJob", "import_string"]
 
@@ -38,7 +38,6 @@ class ImmediateExit(BaseException):
 
 
 class StopJob(ArqError):
-
     def __init__(self, reason: str = "", warning: bool = False) -> None:
         self.warning = warning
         super().__init__(reason)
@@ -47,11 +46,15 @@ class StopJob(ArqError):
 # special signal sent by the main process in case the worker process hasn't received a signal (eg. SIGTERM or SIGINT)
 SIG_PROXY = signal.SIGUSR1
 
-
+# pylint: disable=too-many-instance-attributes,too-many-public-methods
 class BaseWorker(RedisMixin):
     """
     Base class for Workers to inherit from.
     """
+
+    #: cancel tasks queue
+    CANCEL_QUEUE = b"arq:q:cancel"
+
     #: maximum number of jobs which can be execute at the same time by the event loop
     max_concurrent_tasks = 50
 
@@ -59,7 +62,7 @@ class BaseWorker(RedisMixin):
     shutdown_delay = 6
 
     #: default maximum duration of a job
-    timeout_seconds = 60
+    timeout_seconds = 0
 
     #: shadow classes, a list of Actor classes for the Worker to run
     shadows = None
@@ -81,6 +84,7 @@ class BaseWorker(RedisMixin):
 
     drain_class = Drain
     _shadow_factory_timeout = 10
+    cancel_queue_poll_seconds = 1
 
     def __init__(
         self,
@@ -100,6 +104,7 @@ class BaseWorker(RedisMixin):
         :param re_queue: Whether or not to re-queue jobs if the worker quits before the job has time to finish.
         :param kwargs: other keyword arguments, see :class:`arq.utils.RedisMixin` for all available options
         """
+        self._stopped = False
         self._burst_mode = burst
         self.shadows = shadows or self.shadows
         self.queues: List[str] = queues
@@ -118,6 +123,12 @@ class BaseWorker(RedisMixin):
         self._add_signal_handler(signal.SIGTERM, self.handle_sig)
         self._add_signal_handler(SIG_PROXY, self.handle_proxy_signal)
         self._shutdown_lock = asyncio.Lock(loop=self.loop)
+
+    async def cancel(self, job_id, *job_ids):
+        work_logger.debug("Queued cancel task for job %s", job_id)
+        return await self.redis.rpush(
+            self.CANCEL_QUEUE, job_id.encode(), *(j.encode() for j in job_ids)
+        )
 
     async def shadow_factory(self) -> list:
         """
@@ -227,6 +238,7 @@ class BaseWorker(RedisMixin):
         )
 
         self.drain = self.drain_class(
+            cancel_queue=self.CANCEL_QUEUE,
             redis=await self.get_redis(),
             max_concurrent_tasks=self.max_concurrent_tasks,
             shutdown_delay=self.shutdown_delay - 1,
@@ -263,6 +275,11 @@ class BaseWorker(RedisMixin):
         original_redis_queues = list(redis_queues)
 
         async with self.drain:
+            self.loop.create_task(
+                self.drain.check_for_cancel_tasks(
+                    poll_seconds=self.cancel_queue_poll_seconds
+                )
+            )
             await self.heart_beat(original_redis_queues, queue_lookup)
             async for raw_queue, raw_data in self.drain.iter(*redis_queues):
                 if raw_queue is not None:
@@ -369,15 +386,11 @@ class BaseWorker(RedisMixin):
         try:
             result = await func(*j.args, **j.kwargs)
         except StopJob as e:
-            res = self.handle_stop_job(started_at, e, j)
-            if inspect.isawaitable(res):
-                await res
+            await self.handle_stop_job(started_at, e, j)
             return 0
 
         except BaseException as e:
-            res = self.handle_execute_exc(started_at, e, j)
-            if inspect.isawaitable(res):
-                await res
+            await self.handle_execute_exc(started_at, e, j)
             return 1
 
         else:
@@ -407,7 +420,8 @@ class BaseWorker(RedisMixin):
         # exit with zero so we don't increment jobs_failed twice
         return 0
 
-    def handle_stop_job(self, started_at: float, exc: StopJob, j: Job):
+    # pylint: disable=no-self-use
+    async def handle_stop_job(self, started_at: float, exc: StopJob, j: Job):
         if exc.warning:
             msg, logger = (
                 "%-4s ran in%7.3fs ■ %s ● Stopped Warning %s",
@@ -417,7 +431,8 @@ class BaseWorker(RedisMixin):
             msg, logger = "%-4s ran in%7.3fs ■ %s ● Stopped %s", jobs_logger.info
         logger(msg, j.queue, timestamp() - started_at, j.short_ref(), exc)
 
-    def handle_execute_exc(self, started_at: float, exc: BaseException, j: Job):
+    # pylint: disable=no-self-use
+    async def handle_execute_exc(self, started_at: float, exc: BaseException, j: Job):
         exc_type = exc.__class__.__name__
         jobs_logger.exception(
             "%-4s ran in%7.3fs ! %s: %s", j.queue, timestamp() - started_at, j, exc_type
@@ -462,12 +477,20 @@ class BaseWorker(RedisMixin):
         signal.signal(signal.SIGALRM, self.handle_sig_force)
         signal.alarm(self.shutdown_delay)
 
-    def _add_signal_handler(self, signal, handler):
-        self.loop.add_signal_handler(signal, partial(handler, signal))
+    def _add_signal_handler(self, _signal, handler):
+        self.loop.add_signal_handler(_signal, partial(handler, _signal))
 
-    jobs_complete = property(lambda self: self.drain.jobs_complete)
-    jobs_failed = property(lambda self: self.drain.jobs_failed)
-    jobs_timed_out = property(lambda self: self.drain.jobs_timed_out)
+    @property
+    def jobs_complete(self):
+        return self.drain.jobs_complete
+
+    @property
+    def jobs_failed(self):
+        return self.drain.jobs_failed
+
+    @property
+    def jobs_timed_out(self):
+        return self.drain.jobs_timed_out
 
     @property
     def running(self):

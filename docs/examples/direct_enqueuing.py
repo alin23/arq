@@ -2,7 +2,6 @@ from arq import Actor
 
 
 class FooBar(Actor):
-
     async def foo(self, a, b, c):
         print(a + b + c)
 

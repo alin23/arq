@@ -1,10 +1,11 @@
 import sys
 
 from redis import Redis
-
 from rq import Queue, Worker
-from jobs import fast_job, big_argument_job, generate_big_dict
 from rq.decorators import job
+
+from .jobs import big_argument_job, fast_job, generate_big_dict
+
 
 q = Queue(connection=Redis())
 
@@ -20,7 +21,7 @@ def big_argument(v):
 
 
 def start_jobs():
-    for i in range(1000):
+    for _ in range(1000):
         fast.delay()
         v = generate_big_dict()
         big_argument.delay(v)

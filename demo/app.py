@@ -1,15 +1,15 @@
 #!/usr/bin/env python3.6
-import os
 import asyncio
+import os
 from time import time
 
+import chevron
 import uvloop
 from aiohttp import ClientError, ClientSession, web
+from aiohttp_session import SimpleCookieStorage, get_session, setup as session_setup
 
-import chevron
 from arq import Actor, BaseWorker, RedisSettings, concurrent
-from aiohttp_session import setup as session_setup
-from aiohttp_session import SimpleCookieStorage, get_session
+
 
 R_OUTPUT = "output"
 

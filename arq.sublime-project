@@ -1,23 +1,25 @@
 {
-	"build_systems":
-	[
+	"build_systems": [
 		{
 			"file_regex": "^[ ]*File \"(...*?)\", line ([0-9]*)",
 			"name": "Anaconda Python Builder",
 			"selector": "source.python",
-			"shell_cmd": "\"python\" -u \"$file\""
+			"shell_cmd": "\"/Users/alin/.pyenv/versions/arq/bin/python\" -u \"$file\""
 		}
 	],
-	"folders":
-	[
+	"folders": [
 		{
-			"folder_exclude_patterns":
-			[
-				"arq.egg-info",
-				".cache",
-				".pytest_cache"
-			],
+			"folder_exclude_patterns": ["arq.egg-info", ".cache", ".pytest_cache", "__pycache__"],
 			"path": "."
 		}
-	]
+	],
+	"settings": {
+		"PyTest": {
+			"pytest": "/Users/alin/.pyenv/versions/arq/bin/pytest",
+			"mode": "auto"
+		},
+		"python_interpreter": "/Users/alin/.pyenv/versions/arq/bin/python",
+		"test_command": "/Users/alin/.pyenv/versions/arq/bin/pytest",
+		"test_virtualenv": "/Users/alin/.pyenv/versions/arq"
+	}
 }

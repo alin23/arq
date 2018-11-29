@@ -6,7 +6,6 @@ from arq import Actor, BaseWorker, concurrent
 
 
 class Downloader(Actor):
-
     async def startup(self):
         self.session = ClientSession(loop=self.loop)
 

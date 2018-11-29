@@ -4,15 +4,16 @@
 
 Utilises for running arq used by other modules.
 """
-import os
-import base64
 import asyncio
+import base64
 import logging
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Tuple, Union
-from datetime import datetime, timezone, timedelta
 
 import aioredis
 from aioredis import Redis
+
 
 __all__ = ["RedisSettings", "create_pool_lenient", "RedisMixin", "next_cron"]
 logger = logging.getLogger("arq.utils")
@@ -22,6 +23,7 @@ class RedisSettings:
     """
     No-Op class used to hold redis connection redis_settings.
     """
+
     __slots__ = (
         "host",
         "port",
@@ -177,9 +179,7 @@ def create_tz(utcoffset=0) -> timezone:
     """
     if utcoffset == 0:
         return timezone.utc
-
-    else:
-        return timezone(timedelta(seconds=utcoffset))
+    return timezone(timedelta(seconds=utcoffset))
 
 
 EPOCH = datetime(1970, 1, 1)
@@ -206,9 +206,7 @@ def to_unix_ms_tz(dt: datetime) -> Tuple[int, Union[int, None]]:
         _utcoffset = utcoffset.total_seconds()
         unix = (dt - EPOCH_TZ).total_seconds() + _utcoffset
         return int(unix * 1000), int(_utcoffset)
-
-    else:
-        return int((dt - EPOCH).total_seconds() * 1000), None
+    return int((dt - EPOCH).total_seconds() * 1000), None
 
 
 def to_unix_ms(dt: datetime) -> int:
@@ -260,7 +258,7 @@ def truncate(s: str, length: int = DEFAULT_CURTAIL) -> str:
 
 _dt_fields = ["month", "day", "weekday", "hour", "minute", "second", "microsecond"]
 
-
+# pylint: disable=too-many-branches,too-many-return-statements
 def _get_next_dt(dt_, options):  # noqa: C901
     for field in _dt_fields:
         v = options[field]
@@ -271,57 +269,55 @@ def _get_next_dt(dt_, options):  # noqa: C901
             next_v = dt_.weekday()
         else:
             next_v = getattr(dt_, field)
+
         if isinstance(v, int):
             mismatch = next_v != v
         else:
             assert isinstance(v, (set, list, tuple))
             mismatch = next_v not in v
+
         # print(field, v, next_v, mismatch)
-        if mismatch:
-            micro = max(dt_.microsecond - options["microsecond"], 0)
-            if field == "month":
-                if dt_.month == 12:
-                    return datetime(dt_.year + 1, 1, 1)
+        if not mismatch:
+            continue
 
-                else:
-                    return datetime(dt_.year, dt_.month + 1, 1)
+        micro = max(dt_.microsecond - options["microsecond"], 0)
+        if field == "month":
+            if dt_.month == 12:
+                return datetime(dt_.year + 1, 1, 1)
+            return datetime(dt_.year, dt_.month + 1, 1)
 
-            elif field in ("day", "weekday"):
-                return (
-                    dt_
-                    + timedelta(days=1)
-                    - timedelta(
-                        hours=dt_.hour,
-                        minutes=dt_.minute,
-                        seconds=dt_.second,
-                        microseconds=micro,
-                    )
+        if field in ("day", "weekday"):
+            return (
+                dt_
+                + timedelta(days=1)
+                - timedelta(
+                    hours=dt_.hour,
+                    minutes=dt_.minute,
+                    seconds=dt_.second,
+                    microseconds=micro,
                 )
+            )
 
-            elif field == "hour":
-                return (
-                    dt_
-                    + timedelta(hours=1)
-                    - timedelta(
-                        minutes=dt_.minute, seconds=dt_.second, microseconds=micro
-                    )
-                )
+        if field == "hour":
+            return (
+                dt_
+                + timedelta(hours=1)
+                - timedelta(minutes=dt_.minute, seconds=dt_.second, microseconds=micro)
+            )
 
-            elif field == "minute":
-                return (
-                    dt_
-                    + timedelta(minutes=1)
-                    - timedelta(seconds=dt_.second, microseconds=micro)
-                )
+        if field == "minute":
+            return (
+                dt_
+                + timedelta(minutes=1)
+                - timedelta(seconds=dt_.second, microseconds=micro)
+            )
 
-            elif field == "second":
-                return dt_ + timedelta(seconds=1) - timedelta(microseconds=micro)
+        if field == "second":
+            return dt_ + timedelta(seconds=1) - timedelta(microseconds=micro)
 
-            else:
-                assert field == "microsecond"
-                return dt_ + timedelta(
-                    microseconds=options["microsecond"] - dt_.microsecond
-                )
+        assert field == "microsecond"
+        return dt_ + timedelta(microseconds=options["microsecond"] - dt_.microsecond)
+    return None
 
 
 def next_cron(
@@ -333,7 +329,7 @@ def next_cron(
     hour: Union[None, set, int] = None,
     minute: Union[None, set, int] = None,
     second: Union[None, set, int] = 0,
-    microsecond: int = 123456,
+    microsecond: int = 123_456,
 ):
     """
     Find the next datetime matching the given parameters.

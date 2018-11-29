@@ -1,7 +1,9 @@
-from pathlib import Path
+import types
 from importlib.machinery import SourceFileLoader
+from pathlib import Path
 
 from setuptools import setup
+
 
 readme = Path(__file__).parent.joinpath("README.rst")
 if readme.exists():
@@ -10,11 +12,14 @@ if readme.exists():
 else:
     long_description = "-"
 # avoid loading the package before requirements are installed:
-version = SourceFileLoader("version", "arq/version.py").load_module()
+loader = SourceFileLoader("version", "arq/version.py")
+version = types.ModuleType(loader.name)
+loader.exec_module(version)
+
 
 setup(
     name="arq",
-    version=str(version.VERSION),
+    version=str(version.VERSION),  # pylint: disable=no-member
     description="Job queues in python with asyncio, redis and msgpack.",
     long_description=long_description,
     classifiers=[
@@ -50,7 +55,10 @@ setup(
         arq=arq.cli:cli
     """,
     install_requires=[
-        "async-timeout>=1.2.1", "aioredis>=1.0", "click>=6.7", "msgpack-python>=0.4.8"
+        "async-timeout>=1.2.1",
+        "aioredis>=1.0",
+        "click>=6.7",
+        "msgpack-python>=0.4.8",
     ],
     extras_require={"testing": ["pytest>=3.1.0"]},
 )

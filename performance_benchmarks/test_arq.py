@@ -1,11 +1,11 @@
 import asyncio
 
 from arq import Actor, BaseWorker, concurrent
-from jobs import fast_job, big_argument_job, generate_big_dict
+
+from .jobs import big_argument_job, fast_job, generate_big_dict
 
 
 class TestActor(Actor):
-
     @concurrent
     async def fast(self):
         fast_job()
@@ -21,7 +21,7 @@ class Worker(BaseWorker):
 
 async def start_jobs():
     actor = TestActor()
-    for i in range(1000):
+    for _ in range(1000):
         await actor.fast()
         v = generate_big_dict()
         await actor.big_argument(v)

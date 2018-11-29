@@ -1,10 +1,9 @@
 import asyncio
 
 import pytest
-
 from arq import Drain
-from arq.jobs import Job
 from arq.drain import TaskError
+from arq.jobs import Job
 
 
 async def test_drain(redis):
@@ -62,7 +61,7 @@ async def test_drain(redis):
         nonlocal total
         total += int(job.id)
 
-    drain = Drain(redis=redis)
+    drain = Drain(cancel_queue=b"arq:q:cancel", redis=redis)
     async with drain:
         async for raw_queue, raw_data in drain.iter(b"foobar"):
             assert raw_queue == b"foobar"
@@ -87,7 +86,7 @@ async def test_drain_error(redis):
     async def run(job):
         raise RuntimeError("snap")
 
-    drain = Drain(redis=redis, raise_task_exception=True)
+    drain = Drain(cancel_queue=b"arq:q:cancel", redis=redis, raise_task_exception=True)
     with pytest.raises(TaskError) as exc_info:
         async with drain:
             async for raw_queue, raw_data in drain.iter(b"foobar"):
@@ -128,9 +127,14 @@ async def test_drain_timeout(redis, caplog):
         assert v.id == "1"
         await asyncio.sleep(0.2)
 
-    drain = Drain(redis=redis, max_concurrent_tasks=1, semaphore_timeout=0.11)
+    drain = Drain(
+        cancel_queue=b"arq:q:cancel",
+        redis=redis,
+        max_concurrent_tasks=1,
+        semaphore_timeout=0.11,
+    )
     async with drain:
-        async for raw_queue, raw_data in drain.iter(b"foobar"):
+        async for _, raw_data in drain.iter(b"foobar"):
             drain.add(run, Job(raw_data, queue_name="foobar"))
 
-    assert "task semaphore acquisition timed after 0.1s" in caplog
+    assert "task semaphore acquisition timed after 0.1s" in caplog.messages

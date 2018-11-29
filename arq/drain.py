@@ -6,14 +6,15 @@ Drain class used by :class:`arq.worker.BaseWorker` and reusable elsewhere.
 """
 import asyncio
 import logging
-from typing import Set, Dict  # noqa
+from typing import Dict
 
-from aioredis import Redis
-from async_timeout import timeout
+import async_timeout
+from aioredis import MultiExecError, Redis
 
 from arq.utils import gen_random
 
 from .jobs import ArqError
+
 
 __all__ = ["Drain"]
 
@@ -26,6 +27,7 @@ class TaskError(ArqError, RuntimeError):
     pass
 
 
+# pylint: disable=too-many-instance-attributes
 class Drain:
     """
     Drains popping jobs from redis lists and managing a set of tasks with a limited size to execute those jobs.
@@ -34,10 +36,11 @@ class Drain:
     def __init__(
         self,
         *,
+        cancel_queue: bytes,
         redis: Redis,
         max_concurrent_tasks: int = 50,
         shutdown_delay: float = 6,
-        timeout_seconds: int = 60,
+        timeout_seconds: int = 0,
         burst_mode: bool = True,
         raise_task_exception: bool = False,
         semaphore_timeout: float = 60,
@@ -51,6 +54,7 @@ class Drain:
         :param burst_mode: break the iter loop as soon as no more jobs are available by adding an sentinel quit queue
         :param raise_task_exception: whether or not to raise an exception which occurs in a processed task
         """
+        self.cancel_queue = cancel_queue
         self.redis = redis
         self.loop = redis._pool_or_conn._loop
         self.max_concurrent_tasks = max_concurrent_tasks
@@ -62,7 +66,7 @@ class Drain:
         self.burst_mode = burst_mode
         self.raise_task_exception = raise_task_exception
 
-        self.pending_tasks: Set[asyncio.futures.Future] = set()
+        self.pending_tasks: Dict[str, asyncio.futures.Future] = {}
         self.unique_pending_tasks: Dict[str, asyncio.futures.Future] = {}
         self.timeout_callbacks: Dict[str, asyncio.Handle] = {}
 
@@ -94,6 +98,39 @@ class Drain:
     def jobs_in_progress(self):
         return self.max_concurrent_tasks - self.task_semaphore._value
 
+    async def remove_cancel_tasks(self, tasks):
+        tr = self.redis.multi_exec()
+        for task in tasks:
+            tr.lrem(self.cancel_queue, 0, task.job.raw_data)
+
+        try:
+            await tr.execute()
+        except MultiExecError as exc:
+            work_logger.exception(exc)
+
+    async def cancel_tasks(self, task_ids):
+        pending_tasks = [self.pending_tasks[task_id] for task_id in task_ids]
+        for task in pending_tasks:
+            self._cancel_job(task, timed_out=False)
+
+        await self.remove_cancel_tasks(pending_tasks)
+
+    async def check_for_cancel_tasks(self, poll_seconds=1):
+        while True:
+            if not self.running:
+                break
+
+            tasks_to_cancel = await self.redis.lrange(
+                self.cancel_queue, 0, -1, encoding="utf-8"
+            )
+            pending_task_ids = list(
+                set(tasks_to_cancel) & set(self.pending_tasks.keys())
+            )
+            if pending_task_ids:
+                await self.cancel_tasks(pending_task_ids)
+
+            await asyncio.sleep(poll_seconds)
+
     async def iter(self, *raw_queues: bytes, pop_timeout=1):
         """
         blpop jobs from redis queues and yield them. Waits for the number of tasks to drop below max_concurrent_tasks
@@ -116,7 +153,7 @@ class Drain:
         while True:
             work_logger.debug("task semaphore locked: %r", self.task_semaphore.locked())
             try:
-                with timeout(self.semaphore_timeout):
+                with async_timeout.timeout(self.semaphore_timeout):
                     await self.task_semaphore.acquire()
             except asyncio.TimeoutError:
                 work_logger.warning(
@@ -165,6 +202,11 @@ class Drain:
 
         task.add_done_callback(self._job_callback)
 
+        if job.timeout_seconds is not None:
+            timeout_seconds = job.timeout_seconds
+        else:
+            timeout_seconds = self.timeout_seconds
+
         timeout_seconds = job.timeout_seconds or self.timeout_seconds
         if timeout_seconds > 0:
             timeout_callback = self.loop.call_later(
@@ -172,7 +214,7 @@ class Drain:
             )
             self.timeout_callbacks[str(job)] = timeout_callback
 
-        self.pending_tasks.add(task)
+        self.pending_tasks[job.id] = task
         if job.unique:
             self.unique_pending_tasks[job_key] = task
 
@@ -186,14 +228,14 @@ class Drain:
         self.running = False
         cancelled_tasks = 0
         if self.pending_tasks:
-            with await self._finish_lock:
+            async with self._finish_lock:
                 work_logger.info(
                     "drain waiting %0.1fs for %d tasks to finish",
                     timeout,
                     len(self.pending_tasks),
                 )
                 _, pending = await asyncio.wait(
-                    self.pending_tasks, timeout=timeout, loop=self.loop
+                    self.pending_tasks.values(), timeout=timeout, loop=self.loop
                 )
                 if pending:
                     pipe = self.redis.pipeline()
@@ -207,7 +249,7 @@ class Drain:
 
                     if pipe._results:
                         await pipe.execute()
-                self.pending_tasks = set()
+                self.pending_tasks = {}
                 self.unique_pending_tasks = {}
                 self.timeout_callbacks = {}
         return cancelled_tasks
@@ -223,7 +265,6 @@ class Drain:
             self.task_exception = task_exception
         elif task.result():
             self.jobs_failed += 1
-        self._remove_unique_task(task)
         self._remove_task(task)
         jobs_logger.debug(
             "task complete, %d jobs done, %d failed",
@@ -245,22 +286,24 @@ class Drain:
             self.jobs_timed_out += 1
             jobs_logger.error("task timed out %r", task.job)
 
-        self._remove_unique_task(task)
         self._remove_task(task)
 
     def _remove_unique_task(self, task):
         job = task.job
-        if job.unique:
-            job_key = f"{job.class_name}.{job.func_name}"
-            task = self.unique_pending_tasks.get(job_key)
-            if task and (task.done() or task.cancelled()):
-                try:
-                    del self.unique_pending_tasks[job_key]
-                except KeyError:
-                    pass
+        job_key = f"{job.class_name}.{job.func_name}"
+        task = self.unique_pending_tasks.get(job_key)
+        if task and (task.done() or task.cancelled()):
+            try:
+                del self.unique_pending_tasks[job_key]
+            except KeyError:
+                pass
 
     def _remove_task(self, task):
+        job = task.job
+        if job.unique:
+            self._remove_unique_task(task)
+
         try:
-            self.pending_tasks.remove(task)
+            del self.pending_tasks[job.id]
         except KeyError:
             pass
