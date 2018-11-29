@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Union  # noqa
 
+from .config import CANCEL_QUEUE_EXPIRE_SECONDS
 from .jobs import Job
 from .utils import RedisMixin, next_cron, to_unix_ms
 
@@ -71,6 +72,9 @@ class Actor(RedisMixin, metaclass=ActorMeta):
     #: queues the actor can enqueue jobs in, order is important, the first queue is highest priority
     queues = (HIGH_QUEUE, DEFAULT_QUEUE, LOW_QUEUE)
 
+    #: how much time should a cancel task stay in Redis
+    cancel_queue_expire_seconds = CANCEL_QUEUE_EXPIRE_SECONDS
+
     def __init__(self, *args, worker=None, concurrency_enabled=True, **kwargs):
         """
         :param worker: reference to the worker which is managing this actor in shadow mode
@@ -103,10 +107,10 @@ class Actor(RedisMixin, metaclass=ActorMeta):
                 if isinstance(v, CronJob):
                     yield new_v
 
-    async def cancel(self, job_id, *job_ids):
+    async def cancel(self, job_id):
         main_logger.debug("Queued cancel task for job %s", job_id)
-        return await self.redis.rpush(
-            self.CANCEL_QUEUE, job_id.encode(), *(j.encode() for j in job_ids)
+        return await self.redis.setex(
+            f"{self.CANCEL_QUEUE}:{job_id}", self.cancel_queue_expire_seconds, 0
         )
 
     async def enqueue_job(

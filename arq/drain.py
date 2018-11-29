@@ -9,7 +9,7 @@ import logging
 from typing import Dict
 
 import async_timeout
-from aioredis import MultiExecError, Redis
+from aioredis import Redis
 
 from arq.utils import gen_random
 
@@ -98,36 +98,20 @@ class Drain:
     def jobs_in_progress(self):
         return self.max_concurrent_tasks - self.task_semaphore._value
 
-    async def remove_cancel_tasks(self, tasks):
-        tr = self.redis.multi_exec()
-        for task in tasks:
-            tr.lrem(self.cancel_queue, 0, task.job.raw_data)
-
-        try:
-            await tr.execute()
-        except MultiExecError as exc:
-            work_logger.exception(exc)
-
-    async def cancel_tasks(self, task_ids):
-        pending_tasks = [self.pending_tasks[task_id] for task_id in task_ids]
-        for task in pending_tasks:
-            self._cancel_job(task, timed_out=False)
-
-        await self.remove_cancel_tasks(pending_tasks)
-
     async def check_for_cancel_tasks(self, poll_seconds=1):
         while True:
             if not self.running:
                 break
 
-            tasks_to_cancel = await self.redis.lrange(
-                self.cancel_queue, 0, -1, encoding="utf-8"
-            )
-            pending_task_ids = list(
-                set(tasks_to_cancel) & set(self.pending_tasks.keys())
-            )
-            if pending_task_ids:
-                await self.cancel_tasks(pending_task_ids)
+            try:
+                async for key in self.redis.iscan(match=f"{self.cancel_queue}:*"):
+                    job_id = key.decode().rsplit(":", 1)[-1]
+                    if job_id in self.pending_tasks:
+                        self._cancel_job(self.pending_tasks[job_id], timed_out=False)
+                        await self.redis.delete(key)
+            except Exception as exc:
+                work_logger.exception(exc)
+                break
 
             await asyncio.sleep(poll_seconds)
 

@@ -19,6 +19,7 @@ from typing import Dict, List, Type
 
 from async_timeout import timeout
 
+from .config import CANCEL_QUEUE_EXPIRE_SECONDS
 from .drain import Drain
 from .jobs import ArqError, Job
 from .logs import default_log_config
@@ -54,6 +55,9 @@ class BaseWorker(RedisMixin):
 
     #: cancel tasks queue
     CANCEL_QUEUE = b"arq:q:cancel"
+
+    #: how much time should a cancel task stay in Redis
+    cancel_queue_expire_seconds = CANCEL_QUEUE_EXPIRE_SECONDS
 
     #: maximum number of jobs which can be execute at the same time by the event loop
     max_concurrent_tasks = 50
@@ -124,10 +128,10 @@ class BaseWorker(RedisMixin):
         self._add_signal_handler(SIG_PROXY, self.handle_proxy_signal)
         self._shutdown_lock = asyncio.Lock(loop=self.loop)
 
-    async def cancel(self, job_id, *job_ids):
+    async def cancel(self, job_id):
         work_logger.debug("Queued cancel task for job %s", job_id)
-        return await self.redis.rpush(
-            self.CANCEL_QUEUE, job_id.encode(), *(j.encode() for j in job_ids)
+        return await self.redis.setex(
+            f"{self.CANCEL_QUEUE}:{job_id}", self.cancel_queue_expire_seconds, 0
         )
 
     async def shadow_factory(self) -> list:

@@ -323,6 +323,41 @@ async def test_job_cancel(actor, worker, caplog):
     )
 
 
+async def test_job_cancel_expires(actor, worker, caplog):
+    caplog.set_level(logging.DEBUG, "arq.main")
+
+    actor.job_class = Job
+    actor.cancel_queue_expire_seconds = 0.05
+    job = await actor.sleeper(0.5)
+    job2 = await actor.sleeper(0.1)
+    assert job
+    assert job2
+
+    worker._burst_mode = False
+    worker.cancel_queue_poll_seconds = 0.1
+    worker.loop.create_task(worker.run())
+    await asyncio.sleep(0.15)
+    assert await actor.cancel(job.id) == 1
+    await asyncio.sleep(0.1)
+
+    print(caplog.text)
+    log = re.sub(r"(\d\.\d)\d\ds", r"\1XXs", caplog.text)
+    assert f"dft  queued  0.0XXs → {job.id[:6]} DemoActor.sleeper(0.5)" in log
+    assert f"dft  queued  0.0XXs → {job2.id[:6]} DemoActor.sleeper(0.1)" in log
+    assert f"dft  ran in  0.1XXs ← {job2.id[:6]} DemoActor.sleeper ● 0.1" in log
+    assert f"Queued cancel task for job {job.id[:6]}" in log
+    assert (
+        f"dft  ran in  0.1XXs ! {job.id[:6]} DemoActor.sleeper(0.5): CancelledError"
+        not in log
+    )
+    assert "concurrent.futures._base.CancelledError" not in log
+
+    caplog.clear()
+    await worker.close()
+    log = re.sub(r"(\d\.\d)\d\ds", r"\1XXs", caplog.text)
+    assert "drain waiting 5.0s for 1 tasks to finish" in log
+
+
 def test_repeat_worker_close(tmpworkdir, actor_test, caplog, example_file):
     tmpworkdir.join("test.py").write(example_file)
     loop = actor_test.loop
