@@ -109,7 +109,9 @@ class Actor(RedisMixin, metaclass=ActorMeta):
 
     async def cancel(self, job_id):
         main_logger.debug("Queued cancel task for job %s", job_id)
-        return await self.redis.setex(
+        redis = self.redis or await self.get_redis()
+
+        return await redis.setex(
             f"{self.CANCEL_QUEUE}:{job_id}", self.cancel_queue_expire_seconds, 0
         )
 
