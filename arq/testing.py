@@ -20,8 +20,7 @@ class RaiseWorker(BaseWorker):
     Worker which raises exceptions rather than logging them. Useful for testing.
     """
 
-    @classmethod
-    def handle_execute_exc(cls, started_at, exc, j):
+    async def handle_execute_exc(self, started_at, exc, j):
         raise exc
 
     def handle_prepare_exc(self, msg):

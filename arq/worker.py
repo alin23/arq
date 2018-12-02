@@ -313,7 +313,7 @@ class BaseWorker(RedisMixin):
             return False
 
         self.last_health_check = now_ts
-        pending_tasks = sum(not t.done() for t in self.drain.pending_tasks)
+        pending_tasks = sum(not t.done() for t in self.drain.pending_tasks.values())
         info = (
             f"{datetime.utcnow():%b-%d %H:%M:%S} j_complete={self.jobs_complete} j_failed={self.jobs_failed} "
             f"j_timedout={self.jobs_timed_out} j_ongoing={pending_tasks}"
