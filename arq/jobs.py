@@ -10,7 +10,14 @@ from datetime import datetime
 
 import msgpack
 
-from .utils import DEFAULT_CURTAIL, from_unix_ms, timestamp, to_unix_ms_tz, truncate
+from .utils import (
+    DEFAULT_CURTAIL,
+    from_unix_ms,
+    timestamp,
+    to_unix_ms,
+    to_unix_ms_tz,
+    truncate,
+)
 
 
 __all__ = ["JobSerialisationError", "Job", "DatetimeJob"]
@@ -52,6 +59,7 @@ class Job:
         "func_name",
         "unique",
         "timeout_seconds",
+        "expire_seconds",
         "args",
         "kwargs",
         "raw_queue",
@@ -74,10 +82,17 @@ class Job:
 
         self.queue = queue_name or raw_queue.decode()
         self.raw_queue = raw_queue or queue_name.encode()
-        self.queued_at, self.class_name, self.func_name, self.unique, self.timeout_seconds, self.args, self.kwargs, self.id = self.decode_raw(
+        self.queued_at, self.class_name, self.func_name, self.unique, self.timeout_seconds, self.expire_seconds, self.args, self.kwargs, self.id = self.decode_raw(
             raw_data
         )
         self.queued_at /= 1000
+
+    @property
+    def expired(self):
+        if self.expire_seconds <= 0:
+            return False
+        now = to_unix_ms(datetime.utcnow()) / 1000
+        return (now - self.queued_at) > self.expire_seconds
 
     @classmethod
     def encode(
@@ -89,6 +104,7 @@ class Job:
         func_name: str,
         unique: bool,
         timeout_seconds: int,
+        expire_seconds: int,
         args: tuple,
         kwargs: dict,
     ) -> bytes:
@@ -112,6 +128,7 @@ class Job:
                     func_name,
                     unique,
                     timeout_seconds,
+                    expire_seconds,
                     args,
                     kwargs,
                     cls.generate_id(job_id),

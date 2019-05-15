@@ -6,6 +6,38 @@ from arq.drain import TaskError
 from arq.jobs import Job
 
 
+async def test_job_expired_true():
+    raw_data = Job.encode(
+        job_id="1",
+        class_name="class",
+        func_name="func",
+        unique=False,
+        timeout_seconds=None,
+        expire_seconds=0.1,
+        args=tuple(),
+        kwargs={},
+    )
+    job = Job(raw_data, queue_name="dft")
+    await asyncio.sleep(0.11)
+    assert job.expired
+
+
+async def test_job_expired_false():
+    raw_data = Job.encode(
+        job_id="1",
+        class_name="class",
+        func_name="func",
+        unique=False,
+        timeout_seconds=None,
+        expire_seconds=0.1,
+        args=tuple(),
+        kwargs={},
+    )
+    job = Job(raw_data, queue_name="dft")
+    await asyncio.sleep(0.05)
+    assert not job.expired
+
+
 async def test_drain(redis):
     await redis.rpush(
         b"foobar",
@@ -15,6 +47,7 @@ async def test_drain(redis):
             func_name="func",
             unique=False,
             timeout_seconds=None,
+            expire_seconds=None,
             args=tuple(),
             kwargs={},
         ),
@@ -27,6 +60,7 @@ async def test_drain(redis):
             func_name="func",
             unique=False,
             timeout_seconds=None,
+            expire_seconds=None,
             args=tuple(),
             kwargs={},
         ),
@@ -39,6 +73,7 @@ async def test_drain(redis):
             func_name="func",
             unique=False,
             timeout_seconds=None,
+            expire_seconds=None,
             args=tuple(),
             kwargs={},
         ),
@@ -51,6 +86,7 @@ async def test_drain(redis):
             func_name="func",
             unique=False,
             timeout_seconds=None,
+            expire_seconds=None,
             args=tuple(),
             kwargs={},
         ),
@@ -78,6 +114,7 @@ async def test_drain_error(redis):
             func_name="func",
             unique=False,
             timeout_seconds=None,
+            expire_seconds=None,
             args=tuple(),
             kwargs={},
         ),
@@ -106,6 +143,7 @@ async def test_drain_timeout(redis, caplog):
             func_name="func",
             unique=False,
             timeout_seconds=None,
+            expire_seconds=None,
             args=tuple(),
             kwargs={},
         ),
@@ -118,6 +156,7 @@ async def test_drain_timeout(redis, caplog):
             func_name="func",
             unique=False,
             timeout_seconds=None,
+            expire_seconds=None,
             args=tuple(),
             kwargs={},
         ),

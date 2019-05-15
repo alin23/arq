@@ -122,6 +122,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
         queue: str = None,
         unique=False,
         timeout_seconds=0,
+        expire_seconds=0,
         **kwargs,
     ):
         """
@@ -141,7 +142,14 @@ class Actor(RedisMixin, metaclass=ActorMeta):
             redis = self.redis or await self.get_redis()
             main_logger.debug("%s.%s → %s", self.name, func_name, queue)
             return await self.job_future(
-                redis, queue, func_name, unique, timeout_seconds, *args, **kwargs
+                redis,
+                queue,
+                func_name,
+                unique,
+                timeout_seconds,
+                expire_seconds,
+                *args,
+                **kwargs,
             )
 
         main_logger.debug("%s.%s → %s (called directly)", self.name, func_name, queue)
@@ -150,6 +158,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
             func_name=func_name,
             unique=unique,
             timeout_seconds=timeout_seconds,
+            expire_seconds=expire_seconds,
             args=args,
             kwargs=kwargs,
         )
@@ -164,6 +173,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
         func_name: str,
         unique: bool,
         timeout_seconds: int,
+        expire_seconds: int,
         *args,
         **kwargs,
     ):
@@ -172,6 +182,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
             func_name=func_name,
             unique=unique,
             timeout_seconds=timeout_seconds,
+            expire_seconds=expire_seconds,
             args=args,
             kwargs=kwargs,
         )
@@ -222,6 +233,7 @@ class Actor(RedisMixin, metaclass=ActorMeta):
                         cron_job.__name__,
                         cron_job.unique,
                         cron_job.timeout_seconds,
+                        0,
                     )
                 )
 
@@ -246,7 +258,14 @@ class Actor(RedisMixin, metaclass=ActorMeta):
 
 class Bindable:
     def __init__(
-        self, *, func, self_obj=None, unique=False, timeout_seconds=0, **kwargs
+        self,
+        *,
+        func,
+        self_obj=None,
+        unique=False,
+        timeout_seconds=0,
+        expire_seconds=0,
+        **kwargs,
     ):
         self._self_obj: Actor = self_obj
         # if we're already bound we assume func is of the correct type and skip repeat logging
@@ -258,6 +277,7 @@ class Bindable:
         self._kwargs: Dict[str, Any] = kwargs
         self._unique = unique
         self._timeout_seconds = timeout_seconds
+        self._expire_seconds = expire_seconds
 
     def bind(self, obj: object):
         """
@@ -271,6 +291,7 @@ class Bindable:
             self_obj=obj,
             unique=self._unique,
             timeout_seconds=self._timeout_seconds,
+            expire_seconds=self._expire_seconds,
             **self._kwargs,
         )
         setattr(obj, self._func.__name__, new_inst)
@@ -287,13 +308,21 @@ class Bindable:
     async def __call__(self, *args, **kwargs):
         return await self.defer(*args, **kwargs)
 
-    async def defer(self, *args, queue_name=None, timeout_seconds=None, **kwargs):
+    async def defer(
+        self,
+        *args,
+        queue_name=None,
+        timeout_seconds=None,
+        expire_seconds=None,
+        **kwargs,
+    ):
         return await self._self_obj.enqueue_job(
             self._func.__name__,
             *args,
             queue=queue_name or self._dft_queue,
             unique=self._unique,
             timeout_seconds=timeout_seconds or self._timeout_seconds,
+            expire_seconds=expire_seconds or self._expire_seconds,
             **kwargs,
         )
 
@@ -315,7 +344,14 @@ class Concurrent(Bindable):
     __slots__ = "_func", "_dft_queue", "_self_obj", "_kwargs"
 
     def __init__(
-        self, *, func, self_obj=None, dft_queue=None, unique=False, timeout_seconds=0
+        self,
+        *,
+        func,
+        self_obj=None,
+        dft_queue=None,
+        unique=False,
+        timeout_seconds=0,
+        expire_seconds=0,
     ):
         super().__init__(
             func=func,
@@ -323,6 +359,7 @@ class Concurrent(Bindable):
             dft_queue=dft_queue,
             unique=unique,
             timeout_seconds=timeout_seconds,
+            expire_seconds=expire_seconds,
         )
         if not self.bound:
             main_logger.debug("registering concurrent function %s", func.__qualname__)
@@ -335,7 +372,9 @@ class Concurrent(Bindable):
         return f"<concurrent function {self._func.__qualname__} of {self._self_obj!r}>"
 
 
-def concurrent(func=None, queue=None, unique=False, timeout_seconds=0):
+def concurrent(
+    func=None, queue=None, unique=False, timeout_seconds=0, expire_seconds=0
+):
     """
     Decorator which defines a functions as concurrent, eg. it should be executed on the worker.
 
@@ -345,16 +384,28 @@ def concurrent(func=None, queue=None, unique=False, timeout_seconds=0):
     """
     if isinstance(func, str):
         return lambda f: Concurrent(
-            func=f, dft_queue=func, unique=unique, timeout_seconds=timeout_seconds
+            func=f,
+            dft_queue=func,
+            unique=unique,
+            timeout_seconds=timeout_seconds,
+            expire_seconds=expire_seconds,
         )
 
     if func is None:
         return lambda f: Concurrent(
-            func=f, dft_queue=queue, unique=unique, timeout_seconds=timeout_seconds
+            func=f,
+            dft_queue=queue,
+            unique=unique,
+            timeout_seconds=timeout_seconds,
+            expire_seconds=expire_seconds,
         )
 
     return Concurrent(
-        func=func, dft_queue=queue, unique=unique, timeout_seconds=timeout_seconds
+        func=func,
+        dft_queue=queue,
+        unique=unique,
+        timeout_seconds=timeout_seconds,
+        expire_seconds=expire_seconds,
     )
 
 
@@ -379,6 +430,7 @@ class CronJob(Bindable):
         self.unique = kwargs2.pop("unique")
         kwargs2.pop("dft_queue")
         self.timeout_seconds = kwargs2.pop("timeout_seconds", None)
+        kwargs2.pop("expire_seconds", None)
         self.cron_kwargs = kwargs2
         self.next_run = None
         if self.bound:

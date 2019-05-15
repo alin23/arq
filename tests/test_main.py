@@ -19,7 +19,7 @@ async def test_simple_job_dispatch(tmpworkdir, actor):
     data = msgpack.unpackb(await actor.redis.lpop(b"arq:q:dft"), raw=False)
     # timestamp
     assert 1e12 < data.pop(0) < 3e12
-    assert data == ["DemoActor", "add_numbers", False, 0, [1, 2], {}, "__id__"]
+    assert data == ["DemoActor", "add_numbers", False, 0, 0, [1, 2], {}, "__id__"]
 
 
 async def test_concurrency_disabled_job_dispatch(tmpworkdir, actor):
@@ -42,7 +42,7 @@ async def test_enqueue_redis_job(actor, redis_conn):
     data = msgpack.unpackb(dft_queue[0], raw=False)
     # timestamp
     assert 1e12 < data.pop(0) < 3e12
-    assert data == ["DemoActor", "add_numbers", False, 0, [1, 2], {}, "__id__"]
+    assert data == ["DemoActor", "add_numbers", False, 0, 0, [1, 2], {}, "__id__"]
 
 
 async def test_dispatch_work(tmpworkdir, caplog, actor, worker):
@@ -76,6 +76,7 @@ async def test_dispatch_work(tmpworkdir, caplog, actor, worker):
     log = re.sub(r"\d{4}-\d+-\d+ \d+:\d+:\d+", "<date time>", log)
     log = re.sub(r"\w{3}-\d+ \d+:\d+:\d+", "<date time2>", log)
     log = re.sub(r".+\.py\s+\d+\s+(DEBUG|INFO)\s+", "", log)
+    log = re.sub(r"(DEBUG|INFO|ERROR)\s+.+\.py:\d+\s+", "", log)
     log = re.sub(str(actor.redis.address[1]), "REDIS_PORT", log)
     assert log.strip().split("\n") == [
         "DemoActor.add_numbers → dft",
@@ -85,7 +86,7 @@ async def test_dispatch_work(tmpworkdir, caplog, actor, worker):
         "Running worker with 1 shadow listening to 3 queues",
         "shadows: DemoActor | queues: high, dft, low",
         "Creating tcp connection to ('localhost', REDIS_PORT)",
-        "recording health: <date time2> j_complete=0 j_failed=0 j_timedout=0 j_ongoing=0 q_high=1 q_dft=1 q_low=0",
+        "recording health: <date time2> j_complete=0 j_failed=0 j_timedout=0 j_expired=0 j_ongoing=0 q_high=1 q_dft=1 q_low=0",
         "starting main blpop loop",
         "populating quit queue to prompt exit: arq:quit-<random>",
         "task semaphore locked: False",
@@ -102,7 +103,7 @@ async def test_dispatch_work(tmpworkdir, caplog, actor, worker):
         "dft  ran in  0.0XXs ← __id__ DemoActor.add_numbers ● ",
         "task complete, 2 jobs done, 0 failed",
         "got job from the quit queue, stopping",
-        "shutting down worker after 0.0XXs ◆ 2 jobs done ◆ 0 failed ◆ 0 timed out",
+        "shutting down worker after 0.0XXs ◆ 2 jobs done ◆ 0 failed ◆ 0 timed out ◆ 0 expired",
         "Closed 2 connection(s)",
     ]
 
@@ -128,6 +129,7 @@ async def test_handle_exception(actor, worker, caplog):
     log = re.sub(r"\d{4}-\d+-\d+ \d+:\d+:\d+", "<date time>", log)
     log = re.sub(r"\w{3}-\d+ \d+:\d+:\d+", "<date time2>", log)
     log = re.sub(r".+\.py\s+\d+\s+(DEBUG|INFO|ERROR)\s+", "", log)
+    log = re.sub(r"(DEBUG|INFO|ERROR)\s+.+\.py:\d+\s+", "", log)
     log = re.sub(str(actor.redis.address[1]), "REDIS_PORT", log)
 
     assert log.strip().split("\n") == [
@@ -137,7 +139,7 @@ async def test_handle_exception(actor, worker, caplog):
         "Running worker with 1 shadow listening to 3 queues",
         "shadows: DemoActor | queues: high, dft, low",
         "Creating tcp connection to ('localhost', REDIS_PORT)",
-        "recording health: <date time2> j_complete=0 j_failed=0 j_timedout=0 j_ongoing=0 q_high=0 q_dft=1 q_low=0",
+        "recording health: <date time2> j_complete=0 j_failed=0 j_timedout=0 j_expired=0 j_ongoing=0 q_high=0 q_dft=1 q_low=0",
         "starting main blpop loop",
         "populating quit queue to prompt exit: arq:quit-<random>",
         "task semaphore locked: False",
@@ -156,7 +158,7 @@ async def test_handle_exception(actor, worker, caplog):
         "RuntimeError: boom",
         "task complete, 1 jobs done, 1 failed",
         "got job from the quit queue, stopping",
-        "shutting down worker after 0.0XXs ◆ 1 jobs done ◆ 1 failed ◆ 0 timed out",
+        "shutting down worker after 0.0XXs ◆ 1 jobs done ◆ 1 failed ◆ 0 timed out ◆ 0 expired",
         "Closed 2 connection(s)",
     ]
 
@@ -210,6 +212,7 @@ async def test_call_direct(actor, worker, caplog):
     assert worker.jobs_complete == 1
     log = re.sub(r"0.0\d\ds", "0.0XXs", caplog.text)
     log = re.sub(r".+\.py\s+\d+\s+(DEBUG|INFO)\s+", "", log)
+    log = re.sub(r"(DEBUG|INFO|ERROR)\s+.+\.py:\d+\s+", "", log)
     assert (
         "dft  queued  0.0XXs → __id__ DemoActor.direct_method(1, 2)\n"
         "dft  ran in  0.0XXs ← __id__ DemoActor.direct_method ● 3"

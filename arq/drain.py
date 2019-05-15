@@ -73,7 +73,12 @@ class Drain:
         self.task_exception: Exception = None
         self.semaphore_timeout = semaphore_timeout
 
-        self.jobs_complete, self.jobs_failed, self.jobs_timed_out = 0, 0, 0
+        self.jobs_complete, self.jobs_failed, self.jobs_timed_out, self.jobs_expired = (
+            0,
+            0,
+            0,
+            0,
+        )
         self.running = False
         self._finish_lock = asyncio.Lock(loop=self.loop)
 

@@ -257,11 +257,12 @@ class BaseWorker(RedisMixin):
         finally:
             t = (timestamp() - self.start) if self.start else 0
             work_logger.info(
-                "shutting down worker after %0.3fs ◆ %d jobs done ◆ %d failed ◆ %d timed out",
+                "shutting down worker after %0.3fs ◆ %d jobs done ◆ %d failed ◆ %d timed out ◆ %d expired",
                 t,
                 self.jobs_complete,
                 self.jobs_failed,
                 self.jobs_timed_out,
+                self.jobs_expired,
             )
             if not self.reusable:
                 await self.close()
@@ -294,6 +295,11 @@ class BaseWorker(RedisMixin):
                         queue_name=queue_lookup[raw_queue],
                         raw_queue=raw_queue,
                     )
+                    if job.expired:
+                        self.drain.jobs_expired += 1
+                        jobs_logger.error("task expired %r", job)
+                        continue
+
                     shadow = self._shadow_lookup.get(job.class_name)
                     re_enqueue = shadow and getattr(shadow, "re_enqueue_jobs", False)
                     work_logger.debug(
@@ -316,7 +322,7 @@ class BaseWorker(RedisMixin):
         pending_tasks = sum(not t.done() for t in self.drain.pending_tasks.values())
         info = (
             f"{datetime.utcnow():%b-%d %H:%M:%S} j_complete={self.jobs_complete} j_failed={self.jobs_failed} "
-            f"j_timedout={self.jobs_timed_out} j_ongoing={pending_tasks}"
+            f"j_timedout={self.jobs_timed_out} j_expired={self.jobs_expired} j_ongoing={pending_tasks}"
         )
 
         tr = self.drain.redis.multi_exec()
@@ -497,6 +503,10 @@ class BaseWorker(RedisMixin):
     @property
     def jobs_timed_out(self):
         return self.drain.jobs_timed_out
+
+    @property
+    def jobs_expired(self):
+        return self.drain.jobs_expired
 
     @property
     def running(self):

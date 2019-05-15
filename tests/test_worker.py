@@ -226,7 +226,7 @@ async def test_worker_job_timeout(actor, worker, caplog):
     await worker.close()
     log = re.sub(r"(\d\.\d)\d\ds", r"\1XXs", caplog.text)
     assert (
-        "shutting down worker after 0.1XXs ◆ 2 jobs done ◆ 1 failed ◆ 1 timed out"
+        "shutting down worker after 0.1XXs ◆ 2 jobs done ◆ 1 failed ◆ 1 timed out ◆ 0 expired"
         in log
     )
 
@@ -255,7 +255,37 @@ async def test_job_timeout(actor, worker, caplog):
     await worker.close()
     log = re.sub(r"(\d\.\d)\d\ds", r"\1XXs", caplog.text)
     assert (
-        "shutting down worker after 0.1XXs ◆ 2 jobs done ◆ 1 failed ◆ 1 timed out"
+        "shutting down worker after 0.1XXs ◆ 2 jobs done ◆ 1 failed ◆ 1 timed out ◆ 0 expired"
+        in log
+    )
+
+
+async def test_job_expired(actor, worker, caplog):
+    assert await actor.sleeper_with_expire_100ms(0.05)
+    assert await actor.sleeper_with_expire_500ms(0.1)
+    worker._burst_mode = False
+    await asyncio.sleep(0.15)
+    worker.loop.create_task(worker.run())
+    await asyncio.sleep(0.15)
+    print(caplog.text)
+    log = re.sub(r"(\d\.\d)\d\ds", r"\1XXs", caplog.text)
+    log = re.sub(r"(DEBUG|INFO|ERROR)\s+.+\.py:\d+\s+", "", log)
+    assert (
+        "dft  queued  0.1XXs → __id__ DemoActor.sleeper_with_expire_500ms(0.1)" in log
+    )
+    assert (
+        "dft  ran in  0.1XXs ← __id__ DemoActor.sleeper_with_expire_500ms ● 0.1" in log
+    )
+    assert (
+        "task expired <Job __id__ DemoActor.sleeper_with_expire_100ms(0.05) on dft>"
+        in log
+    )
+    caplog.clear()
+    await worker.close()
+    log = re.sub(r"(\d\.\d)\d\ds", r"\1XXs", caplog.text)
+    log = re.sub(r"(DEBUG|INFO|ERROR)\s+.+\.py:\d+\s+", "", log)
+    assert (
+        "shutting down worker after 0.1XXs ◆ 1 jobs done ◆ 0 failed ◆ 0 timed out ◆ 1 expired"
         in log
     )
 
@@ -281,7 +311,7 @@ async def test_job_unique(actor, worker, caplog):
     await worker.close()
     log = re.sub(r"(\d\.\d)\d\ds", r"\1XXs", caplog.text)
     assert (
-        "shutting down worker after 0.1XXs ◆ 2 jobs done ◆ 1 failed ◆ 0 timed out"
+        "shutting down worker after 0.1XXs ◆ 2 jobs done ◆ 1 failed ◆ 0 timed out ◆ 0 expired"
         in log
     )
 
@@ -318,7 +348,7 @@ async def test_job_cancel(actor, worker, caplog):
     await worker.close()
     log = re.sub(r"(\d\.\d)\d\ds", r"\1XXs", caplog.text)
     assert (
-        "shutting down worker after 0.2XXs ◆ 2 jobs done ◆ 1 failed ◆ 0 timed out"
+        "shutting down worker after 0.2XXs ◆ 2 jobs done ◆ 1 failed ◆ 0 timed out ◆ 0 expired"
         in log
     )
 

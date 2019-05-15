@@ -65,6 +65,16 @@ class DemoActor(Actor):
         await asyncio.sleep(t, loop=self.loop)
         return t
 
+    @concurrent(expire_seconds=0.1)
+    async def sleeper_with_expire_100ms(self, t):
+        await asyncio.sleep(t, loop=self.loop)
+        return t
+
+    @concurrent(expire_seconds=0.5)
+    async def sleeper_with_expire_500ms(self, t):
+        await asyncio.sleep(t, loop=self.loop)
+        return t
+
     @concurrent(unique=True)
     async def sleeper_unique(self, t):
         await asyncio.sleep(t, loop=self.loop)
