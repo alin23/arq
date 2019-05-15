@@ -5,4 +5,4 @@ from distutils.version import (  # pylint: disable=import-error,no-name-in-modul
 
 __all__ = ["VERSION"]
 
-VERSION = StrictVersion("1.1.3")
+VERSION = StrictVersion("1.2.0")
