@@ -93,7 +93,7 @@ class Drain:
                 f"finishing the drain required {cancelled_tasks} tasks to be cancelled"
             )
 
-        elif self.raise_task_exception and self.task_exception:
+        if self.raise_task_exception and self.task_exception:
             e = self.task_exception
             raise TaskError(
                 f"A processed task failed: {e.__class__.__name__}, {e}"
